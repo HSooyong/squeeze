@@ -45,7 +45,12 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: |
+          # One target at a time, two jobs. A full parallel build compiles JUCE twice
+          # at once and the Linux runner is stopped mid-compile.
+          cmake --build build --config Release --parallel 2 --target squeeze_tests
+          cmake --build build --config Release --parallel 2 --target SQUEEZE_VST3
+          cmake --build build --config Release --parallel 2 --target SQUEEZE_Standalone
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
