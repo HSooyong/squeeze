@@ -11,7 +11,7 @@ inline constexpr int kDesignHeight = 660;
 inline constexpr int kHeaderHeight = 56;
 inline constexpr int kLeftColumnWidth = 200;
 
-// Idle and animating UI rates. The placeholder editor does not run a timer yet.
+// Idle and animating UI rates. The editor stays at the idle rate until a frame arrives.
 inline constexpr int kIdleTimerHz = 4;
 inline constexpr int kActiveTimerHz = 60;
 

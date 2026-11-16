@@ -62,7 +62,9 @@ set(SQUEEZE_PLUGIN_SOURCES
     Source/State.cpp
     Source/ColorStage.cpp
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/Ui/Widgets.cpp
+    Source/Ui/SceneView.cpp)
 
 target_sources(SQUEEZE PRIVATE ${SQUEEZE_PLUGIN_SOURCES})
 
@@ -115,6 +117,7 @@ target_sources(squeeze_tests
         tests/StateTest.cpp
         tests/ProcessTest.cpp
         tests/DspTests.cpp
+        tests/LayoutTest.cpp
         tests/TestRunner.cpp)
 
 target_include_directories(squeeze_tests
@@ -153,7 +156,8 @@ add_test(NAME stability COMMAND squeeze_tests stability)
 add_test(NAME mode_switch COMMAND squeeze_tests mode_switch)
 add_test(NAME visual_contract COMMAND squeeze_tests visual_contract)
 add_test(NAME perf COMMAND squeeze_tests perf)
-set_tests_properties(params state process static_curve timing_vca timing_fet null_bypass mode_switch visual_contract PROPERTIES TIMEOUT 180)
+add_test(NAME layout COMMAND squeeze_tests layout)
+set_tests_properties(params state process static_curve timing_vca timing_fet null_bypass mode_switch visual_contract layout PROPERTIES TIMEOUT 180)
 set_tests_properties(timing_opto timing_varimu level_match PROPERTIES TIMEOUT 300)
 set_tests_properties(stability PROPERTIES TIMEOUT 900)
 set_tests_properties(perf PROPERTIES LABELS perf TIMEOUT 180)
