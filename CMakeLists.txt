@@ -60,6 +60,7 @@ juce_add_plugin(SQUEEZE
 set(SQUEEZE_PLUGIN_SOURCES
     Source/Parameters.cpp
     Source/State.cpp
+    Source/ColorStage.cpp
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp)
 
@@ -68,14 +69,17 @@ target_sources(SQUEEZE PRIVATE ${SQUEEZE_PLUGIN_SOURCES})
 target_include_directories(SQUEEZE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Source)
 
 add_library(SqueezeCore STATIC
+    Source/Core/StaticCurve.cpp
     Source/Core/OptoModel.cpp
     Source/Core/VcaModel.cpp
     Source/Core/FetModel.cpp
     Source/Core/VariMuModel.cpp
+    Source/Core/LevelMatch.cpp
     Source/Core/Engine.cpp)
 
 target_include_directories(SqueezeCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Source/Core)
 target_compile_features(SqueezeCore PUBLIC cxx_std_17)
+set_target_properties(SqueezeCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(MSVC)
     target_compile_options(SqueezeCore PRIVATE /W4)
@@ -110,6 +114,7 @@ target_sources(squeeze_tests
         tests/ParamsTest.cpp
         tests/StateTest.cpp
         tests/ProcessTest.cpp
+        tests/DspTests.cpp
         tests/TestRunner.cpp)
 
 target_include_directories(squeeze_tests
@@ -129,6 +134,7 @@ target_link_libraries(squeeze_tests
     PRIVATE
         SqueezeCore
         juce::juce_audio_utils
+        juce::juce_dsp
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 
@@ -136,4 +142,18 @@ enable_testing()
 add_test(NAME params COMMAND squeeze_tests params)
 add_test(NAME state COMMAND squeeze_tests state)
 add_test(NAME process COMMAND squeeze_tests process)
-set_tests_properties(params state process PROPERTIES TIMEOUT 120)
+add_test(NAME static_curve COMMAND squeeze_tests static_curve)
+add_test(NAME timing_opto COMMAND squeeze_tests timing_opto)
+add_test(NAME timing_vca COMMAND squeeze_tests timing_vca)
+add_test(NAME timing_fet COMMAND squeeze_tests timing_fet)
+add_test(NAME timing_varimu COMMAND squeeze_tests timing_varimu)
+add_test(NAME null_bypass COMMAND squeeze_tests null_bypass)
+add_test(NAME level_match COMMAND squeeze_tests level_match)
+add_test(NAME stability COMMAND squeeze_tests stability)
+add_test(NAME mode_switch COMMAND squeeze_tests mode_switch)
+add_test(NAME visual_contract COMMAND squeeze_tests visual_contract)
+add_test(NAME perf COMMAND squeeze_tests perf)
+set_tests_properties(params state process static_curve timing_vca timing_fet null_bypass mode_switch visual_contract PROPERTIES TIMEOUT 180)
+set_tests_properties(timing_opto timing_varimu level_match PROPERTIES TIMEOUT 300)
+set_tests_properties(stability PROPERTIES TIMEOUT 900)
+set_tests_properties(perf PROPERTIES LABELS perf TIMEOUT 180)

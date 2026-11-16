@@ -11,6 +11,17 @@ namespace squeeze::test
 void runParams();
 void runState();
 void runProcess();
+void runStaticCurve();
+void runTimingOpto();
+void runTimingVca();
+void runTimingFet();
+void runTimingVariMu();
+void runNullBypass();
+void runLevelMatch();
+void runStability();
+void runModeSwitch();
+void runVisualContract();
+void runPerf();
 }
 
 namespace
@@ -28,6 +39,28 @@ int runNamed(const std::string& name)
             squeeze::test::runState();
         else if (name == "process")
             squeeze::test::runProcess();
+        else if (name == "static_curve")
+            squeeze::test::runStaticCurve();
+        else if (name == "timing_opto")
+            squeeze::test::runTimingOpto();
+        else if (name == "timing_vca")
+            squeeze::test::runTimingVca();
+        else if (name == "timing_fet")
+            squeeze::test::runTimingFet();
+        else if (name == "timing_varimu")
+            squeeze::test::runTimingVariMu();
+        else if (name == "null_bypass")
+            squeeze::test::runNullBypass();
+        else if (name == "level_match")
+            squeeze::test::runLevelMatch();
+        else if (name == "stability")
+            squeeze::test::runStability();
+        else if (name == "mode_switch")
+            squeeze::test::runModeSwitch();
+        else if (name == "visual_contract")
+            squeeze::test::runVisualContract();
+        else if (name == "perf")
+            squeeze::test::runPerf();
         else
         {
             std::cerr << "Unknown test \"" << name << "\"\n";
