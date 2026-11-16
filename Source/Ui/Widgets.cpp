@@ -155,9 +155,13 @@ bool GainReadout::contentFits() const
     const int mode = juce::jlimit(0, 3, juce::roundToInt(rawValue(processor, params::mode)));
     juce::String detail;
 
+    juce::String detailEn;
+
     if (mode == 0)
-        detail = strings::peakWord() + " " + juce::String(juce::roundToInt(rawValue(processor, params::optoPeakRed)))
-                 + " · " + (rawValue(processor, params::optoLimit) >= 0.5f ? strings::limit() : strings::compress());
+    {
+        detail = strings::peakWord() + " " + juce::String(juce::roundToInt(rawValue(processor, params::optoPeakRed)));
+        detailEn = "PEAK";
+    }
     else if (mode == 1)
         detail = valueText(processor, params::vcaRatio) + " · " + valueText(processor, params::vcaThreshold);
     else if (mode == 2)
@@ -166,8 +170,9 @@ bool GainReadout::contentFits() const
         detail = valueText(processor, params::vmuTime) + " · " + valueText(processor, params::vmuThreshold);
 
     const auto detailFit = fitLine(detail, 12.0f, 10.0f, getWidth(), 4);
-    const float used = title.size + titleEn.size + number.size + detailFit.size + 16.0f;
-    return title.ok && titleEn.ok && number.ok && detailFit.ok && used <= static_cast<float>(getHeight());
+    const auto detailEnFit = fitLine(detailEn, 9.0f, 8.0f, getWidth(), 4);
+    const float used = title.size + titleEn.size + number.size + detailFit.size + (detailEn.isEmpty() ? 0.0f : detailEnFit.size) + 16.0f;
+    return title.ok && titleEn.ok && number.ok && detailFit.ok && detailEnFit.ok && used <= static_cast<float>(getHeight());
 }
 
 void GainReadout::paint(juce::Graphics& g)
@@ -179,9 +184,13 @@ void GainReadout::paint(juce::Graphics& g)
     const auto number = fitLine(numberText, 40.0f, 22.0f, getWidth(), 4);
     juce::String detail;
 
+    juce::String detailEn;
+
     if (mode == 0)
-        detail = strings::peakWord() + " " + juce::String(juce::roundToInt(rawValue(processor, params::optoPeakRed)))
-                 + " · " + (rawValue(processor, params::optoLimit) >= 0.5f ? strings::limit() : strings::compress());
+    {
+        detail = strings::peakWord() + " " + juce::String(juce::roundToInt(rawValue(processor, params::optoPeakRed)));
+        detailEn = "PEAK";
+    }
     else if (mode == 1)
         detail = valueText(processor, params::vcaRatio) + " · " + valueText(processor, params::vcaThreshold);
     else if (mode == 2)
@@ -190,6 +199,7 @@ void GainReadout::paint(juce::Graphics& g)
         detail = valueText(processor, params::vmuTime) + " · " + valueText(processor, params::vmuThreshold);
 
     const auto detailFit = fitLine(detail, 12.0f, 10.0f, getWidth(), 4);
+    const auto detailEnFit = fitLine(detailEn, 9.0f, 8.0f, getWidth(), 4);
     auto area = getLocalBounds();
 
     g.setColour(kMuted);
@@ -205,6 +215,13 @@ void GainReadout::paint(juce::Graphics& g)
     g.setColour(kText);
     g.setFont(interfaceFont(detailFit.size));
     g.drawText(detail, area.removeFromTop(juce::roundToInt(detailFit.size + 2.0f)), juce::Justification::centredLeft, false);
+
+    if (detailEn.isNotEmpty())
+    {
+        g.setColour(kMuted);
+        g.setFont(interfaceFont(detailEnFit.size));
+        g.drawText(detailEn, area.removeFromTop(juce::roundToInt(detailEnFit.size + 2.0f)), juce::Justification::centredLeft, false);
+    }
 }
 
 OutputSlider::OutputSlider(SqueezeProcessor& processorIn)

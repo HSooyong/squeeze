@@ -7,6 +7,7 @@
 #include "Ui/Theme.h"
 
 #include <algorithm>
+#include <cstdio>
 
 namespace squeeze
 {
@@ -85,6 +86,7 @@ void SqueezeEditor::paint(juce::Graphics& g)
     g.fillRect(boxes.header);
     g.setColour(ui::kLine);
     g.drawLine(0.0f, static_cast<float>(boxes.header.getBottom()), static_cast<float>(getWidth()), static_cast<float>(boxes.header.getBottom()), 1.0f);
+    std::fprintf(stderr, "editor %d x %d scene %d %d %d %d\n", getWidth(), getHeight(), scene.getX(), scene.getY(), scene.getWidth(), scene.getHeight());
 }
 
 void SqueezeEditor::resized()

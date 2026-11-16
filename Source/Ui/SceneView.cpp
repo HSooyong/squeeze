@@ -5,6 +5,7 @@
 #include "Ui/Theme.h"
 
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace squeeze::ui
@@ -49,26 +50,64 @@ struct Item
     float minimumSecondary = 8.0f;
     int role = 0;
     bool locked = false;
+    bool framed = true;
+
+    juce::Rectangle<int> content() const
+    {
+        const int padX = framed ? 10 : 4;
+        const int padY = framed ? 7 : 2;
+        auto inside = bounds.reduced(padX, padY);
+        return inside.getWidth() > 4 && inside.getHeight() > 4 ? inside : bounds;
+    }
 
     bool fits() const
     {
-        const auto first = fitLine(primary, preferred, minimum, bounds.getWidth(), 8);
-        const auto second = fitLine(secondary, preferredSecondary, minimumSecondary, bounds.getWidth(), 8);
-        const float used = secondary.isEmpty() ? first.size + 4.0f : first.size + second.size + 6.0f;
-        return first.ok && second.ok && used <= static_cast<float>(bounds.getHeight());
+        if (primary.isEmpty() && secondary.isEmpty())
+            return true;
+
+        const auto inside = content();
+        const auto first = fitLine(primary, preferred, minimum, inside.getWidth(), 0);
+        const auto second = fitLine(secondary, preferredSecondary, minimumSecondary, inside.getWidth(), 0);
+        const float used = secondary.isEmpty() ? first.size : first.size + second.size + 3.0f;
+        return first.ok && second.ok && used <= static_cast<float>(inside.getHeight());
     }
 };
 
 struct SceneMap
 {
     std::vector<Item> items;
+    std::vector<juce::Rectangle<float>> solids;
     juce::Rectangle<float> dome;
     juce::Rectangle<float> cup;
+    juce::Rectangle<float> pipe;
+    juce::Rectangle<float> spout;
+    juce::Rectangle<float> coil;
+    juce::Rectangle<float> toroid;
+    juce::Rectangle<float> pole;
+    juce::Rectangle<float> sphere;
+    juce::Rectangle<float> tube;
+    juce::Rectangle<float> heatBar;
+    juce::Rectangle<float> ratioBar;
     juce::Point<float> lampBase;
     juce::Point<float> lampElbow;
     juce::Point<float> lampHead;
     float lampAngle = 0.0f;
 };
+
+void addSolid(SceneMap& map, juce::Rectangle<float> solid)
+{
+    if (! solid.isEmpty())
+        map.solids.push_back(solid);
+}
+
+juce::Rectangle<int> enclose(juce::Rectangle<float> solid)
+{
+    const int x = static_cast<int>(std::floor(solid.getX()));
+    const int y = static_cast<int>(std::floor(solid.getY()));
+    const int right = static_cast<int>(std::ceil(solid.getRight()));
+    const int bottom = static_cast<int>(std::ceil(solid.getBottom()));
+    return { x, y, juce::jmax(0, right - x), juce::jmax(0, bottom - y) };
+}
 
 float rawOf(SqueezeProcessor& processor, const char* id)
 {
@@ -81,14 +120,6 @@ float rawOf(SqueezeProcessor& processor, const char* id)
 juce::RangedAudioParameter* parameter(SqueezeProcessor& processor, const char* id)
 {
     return dynamic_cast<juce::RangedAudioParameter*>(processor.getApvts().getParameter(id));
-}
-
-juce::String reductionText(float grDb)
-{
-    if (! std::isfinite(grDb) || std::abs(grDb) < 0.05f)
-        return "0.0 dB";
-
-    return "-" + juce::String(std::abs(grDb), 1) + " dB";
 }
 
 juce::String dbOne(float value)
@@ -110,6 +141,12 @@ Item makeItem(juce::Rectangle<int> bounds, juce::String primary, juce::String se
     return item;
 }
 
+Item& tag(std::vector<Item>& items, Item item)
+{
+    items.push_back(std::move(item));
+    return items.back();
+}
+
 juce::String shownFrom(float db)
 {
     return juce::String(db, 1) + " dB";
@@ -126,15 +163,30 @@ juce::Rectangle<int> box(int x, int y, int w, int h)
     return { x, y, w, h };
 }
 
+juce::Rectangle<float> shadeBounds(juce::Point<float> head, juce::Rectangle<float> dome)
+{
+    const auto aim = dome.getCentre() - head;
+    const float facing = std::atan2(aim.y, aim.x) * 0.25f + juce::MathConstants<float>::halfPi * 0.75f;
+    const juce::Point<float> along(std::cos(facing), std::sin(facing));
+    const juce::Point<float> side(-along.y, along.x);
+    const auto neck = head - along * 8.0f;
+    const auto mouth = head + along * 86.0f;
+    juce::Rectangle<float> bounds(neck.x, neck.y, 0.0f, 0.0f);
+    const juce::Point<float> corners[] = {
+        neck + side * 18.0f, neck - side * 18.0f, mouth + side * 48.0f, mouth - side * 48.0f,
+    };
+
+    for (const auto& corner : corners)
+        bounds = bounds.getUnion(juce::Rectangle<float>(corner.x, corner.y, 0.0f, 0.0f));
+
+    return bounds.expanded(6.0f);
+}
+
 SceneMap buildMap(juce::Rectangle<int> local, const Readings& readings)
 {
     SceneMap map;
     const int width = local.getWidth();
     const int height = local.getHeight();
-    const auto gr = box(width - 166, 12, 150, 44);
-    map.items.push_back(makeItem(gr, reductionText(readings.grDb), {}, 0, false));
-    map.items.back().preferred = 18.0f;
-    map.items.back().minimum = 12.0f;
 
     if (readings.mode == 0)
     {
@@ -144,29 +196,38 @@ SceneMap buildMap(juce::Rectangle<int> local, const Readings& readings)
         map.lampElbow = { width * 0.36f, height * 0.50f };
         const float length = width * 0.16f;
         map.lampHead = map.lampElbow + juce::Point<float>(std::cos(map.lampAngle), std::sin(map.lampAngle)) * length;
+        map.dome = { width * 0.60f, height * 0.56f, width * 0.28f, height * 0.30f };
         auto head = box(juce::roundToInt(map.lampHead.x) - 36, juce::roundToInt(map.lampHead.y) - 30, 72, 60);
         map.items.push_back(makeItem(head, {}, {}, 1, false));
-        map.items.push_back(makeItem(box(20, height - 56, 104, 40),
+        map.items.push_back(makeItem(box(20, height - 64, 112, 52),
                                      readings.limit ? strings::limit() : strings::compress(),
                                      readings.limit ? "LIMIT" : "COMPRESS",
                                      2,
                                      false));
-        map.dome = { width * 0.60f, height * 0.56f, width * 0.28f, height * 0.30f };
+        addSolid(map, shadeBounds(map.lampHead, map.dome));
+        addSolid(map, { map.lampBase.x - 40.0f, map.lampBase.y - 18.0f, 80.0f, 30.0f });
+        addSolid(map, map.dome);
+        const auto armBounds = [](juce::Point<float> from, juce::Point<float> to) {
+            return juce::Rectangle<float>(std::min(from.x, to.x), std::min(from.y, to.y),
+                                          std::abs(to.x - from.x), std::abs(to.y - from.y)).expanded(8.0f);
+        };
+        addSolid(map, armBounds(map.lampBase, map.lampElbow));
+        addSolid(map, armBounds(map.lampElbow, map.lampHead));
     }
     else if (readings.mode == 1)
     {
-        auto valve = box(juce::roundToInt(width * 0.24f), 28, 72, 72);
-        auto opened = box(20, 32, 108, 40);
-        auto locked = box(valve.getX(), valve.getBottom() + 12, 132, 40);
-        auto threshold = box(juce::roundToInt(width * 0.40f), juce::roundToInt(height * 0.46f), 120, 48);
-        auto inLevel = box(width - 166, 68, 150, 40);
-        auto outLevel = box(width - 166, 114, 150, 40);
+        auto opened = box(12, 12, 148, 52);
+        auto valve = box(juce::roundToInt(width * 0.26f), opened.getBottom() + 18, 76, 76);
+        auto locked = box(valve.getX(), valve.getBottom() + 12, 148, 52);
+        auto threshold = box(valve.getRight() + 18, juce::roundToInt(height * 0.50f), 176, 52);
+        auto inLevel = box(width - 164, 12, 152, 44);
+        auto outLevel = box(width - 164, 62, 152, 44);
         const float outDb = readings.rmsDb - readings.grDb;
-        map.items.push_back(makeItem(opened,
-                                     strings::openLabel() + " " + juce::String(juce::roundToInt(readings.valveOpen * 100.0f)) + "%",
-                                     strings::openLabelEn(),
-                                     0,
-                                     false));
+        tag(map.items, makeItem(opened,
+                                strings::openLabel() + " " + juce::String(juce::roundToInt(readings.valveOpen * 100.0f)) + "%",
+                                strings::openLabelEn(),
+                                0,
+                                false)).framed = false;
         map.items.push_back(makeItem(valve, {}, {}, 3, false));
         map.items.push_back(makeItem(locked, strings::valveAuto(), strings::valveAutoEn(), 5, true));
         map.items.push_back(makeItem(threshold,
@@ -174,55 +235,82 @@ SceneMap buildMap(juce::Rectangle<int> local, const Readings& readings)
                                      strings::thresholdLabelEn(),
                                      4,
                                      false));
-        map.items.push_back(makeItem(inLevel, dbOne(readings.rmsDb), "IN", 0, false));
-        map.items.push_back(makeItem(outLevel, dbOne(outDb), "OUT", 0, false));
-        map.cup = { static_cast<float>(threshold.getRight() + 18),
-                    height * 0.30f,
-                    juce::jmax(120.0f, width * 0.18f),
-                    height * 0.56f };
+        tag(map.items, makeItem(inLevel, dbOne(readings.rmsDb), "IN", 0, false)).framed = false;
+        tag(map.items, makeItem(outLevel, dbOne(outDb), "OUT", 0, false)).framed = false;
+
+        const float cupX = static_cast<float>(threshold.getRight() + 18);
+        const float cupRight = static_cast<float>(inLevel.getX() - 16);
+        map.cup = { cupX, height * 0.30f, juce::jmax(90.0f, cupRight - cupX), height * 0.50f };
+        const float pipeY = valve.getCentreY() - 9.0f;
+        map.pipe = { static_cast<float>(valve.getX() - 36), pipeY, map.cup.getCentreX() - static_cast<float>(valve.getX() - 36), 18.0f };
+        map.spout = { map.cup.getCentreX() - 10.0f, pipeY, 20.0f, map.cup.getY() - pipeY + 8.0f };
+        addSolid(map, map.cup);
+        addSolid(map, map.pipe);
+        addSolid(map, map.spout);
+        addSolid(map, valve.toFloat());
     }
     else if (readings.mode == 2)
     {
-        auto charge = box(juce::roundToInt(width * 0.24f) - 44, juce::roundToInt(height * 0.62f) - 70, 96, 132);
-        auto fixed = box(charge.getRight() + 16, juce::roundToInt(height * 0.30f), 120, 40);
-        auto release = box(width - 250, juce::roundToInt(height * 0.36f), 112, 48);
-        auto attack = box(juce::roundToInt(width * 0.42f), juce::roundToInt(height * 0.72f), 168, 44);
-        map.items.push_back(makeItem(charge,
-                                     strings::inputLabel() + " " + shownInput(readings.fetInput),
-                                     strings::inputLabelEn(),
-                                     6,
-                                     false));
+        const float lift = juce::jmap(juce::jlimit(0.0f, 48.0f, readings.fetInput), 0.0f, 48.0f, 0.0f, 22.0f);
+        const float coilW = 76.0f;
+        const float coilH = juce::jmax(150.0f, height * 0.40f);
+        const float coilBottom = height * 0.74f;
+        const float coilX = 188.0f;
+        map.coil = { coilX, coilBottom - coilH - lift, coilW, coilH };
+        map.toroid = { map.coil.getCentreX() - 72.0f, map.coil.getY() - 30.0f, 144.0f, 38.0f };
+        auto release = box(width - 148, juce::roundToInt(map.toroid.getY()) - 4, 136, 52);
+        map.sphere = { static_cast<float>(release.getX() - 56), map.toroid.getCentreY() - 20.0f, 40.0f, 40.0f };
+        map.pole = { map.sphere.getCentreX() - 6.0f, map.sphere.getBottom() - 6.0f, 12.0f, coilBottom - map.sphere.getBottom() };
+        auto input = box(12, juce::roundToInt(map.coil.getBottom()) - 52, 156, 52);
+        auto fixed = box(juce::roundToInt(map.toroid.getRight()) + 16, 12, 132, 48);
+        auto attack = box(juce::roundToInt(map.coil.getRight()) + 28, juce::roundToInt(coilBottom) - 36, 168, 52);
+        map.items.push_back(makeItem(map.coil.toNearestInt().withWidth(juce::jmax(28, map.coil.toNearestInt().getWidth())), {}, {}, 6, false));
+        tag(map.items, makeItem(input,
+                                strings::inputLabel() + " " + shownInput(readings.fetInput),
+                                strings::inputLabelEn(),
+                                0,
+                                false));
         map.items.push_back(makeItem(fixed, strings::fixedLine(), strings::fixedLineEn(), 14, true));
         map.items.push_back(makeItem(release, juce::String(juce::roundToInt(readings.release)) + " ms", "RELEASE", 8, false));
         map.items.push_back(makeItem(attack, juce::String(juce::roundToInt(readings.attack)) + juce::String::fromUTF8(u8" µs"), "ATTACK", 7, false));
 
         const char* names[] = { "4", "8", "12", "20", "ALL" };
-        const int dot = 32;
+        const int dot = 34;
         const int gap = 8;
-        const int rowWidth = 5 * dot + 4 * gap;
-        int x = width - rowWidth - 28;
-        const int y = height - dot - 18;
+        int x = juce::roundToInt(map.coil.getRight()) + 24;
+        const int y = height - dot - 12;
 
         for (int index = 0; index < 5; ++index)
         {
             const bool locked = index == 4 && ! readings.allEnabled;
             map.items.push_back(makeItem(box(x, y, dot, dot), names[index], {}, 9 + index, locked));
-            map.items.back().preferred = 11.0f;
+            map.items.back().preferred = 12.0f;
             map.items.back().minimum = 9.0f;
+            map.items.back().framed = false;
             x += dot + gap;
         }
+
+        addSolid(map, map.coil.expanded(4.0f, 2.0f));
+        addSolid(map, map.toroid.expanded(2.0f));
+        addSolid(map, map.pole.expanded(2.0f, 0.0f));
+        addSolid(map, map.sphere.expanded(2.0f));
     }
     else
     {
-        auto heat = box(28, juce::roundToInt(height * 0.24f), 116, 168);
-        auto threshold = box(heat.getRight() + 16, height - 72, 132, 48);
-        auto dial = box(juce::roundToInt(width * 0.46f), height - 76, 120, 52);
-        auto ratio = box(width - 188, juce::roundToInt(height * 0.28f), 120, 150);
-        map.items.push_back(makeItem(heat,
-                                     strings::heat() + " " + dbOne(readings.tubeInput),
-                                     strings::heatEn(),
-                                     15,
-                                     false));
+        const float glassW = juce::jlimit(130.0f, 190.0f, width * 0.20f);
+        map.tube = { (static_cast<float>(width) - glassW) * 0.5f, height * 0.10f, glassW, height * 0.56f };
+        auto heatLabel = box(12, 14, 168, 52);
+        map.heatBar = { 36.0f, static_cast<float>(heatLabel.getBottom() + 14), 28.0f, juce::jmax(80.0f, height * 0.32f) };
+        auto ratioLabel = box(width - 184, 14, 172, 56);
+        map.ratioBar = { static_cast<float>(width - 52), static_cast<float>(ratioLabel.getBottom() + 14), 28.0f, map.heatBar.getHeight() };
+        auto threshold = box(12, height - 64, 176, 52);
+        auto dial = box((width - 150) / 2, height - 64, 150, 52);
+        map.items.push_back(makeItem(map.heatBar.toNearestInt(), {}, {}, 15, false));
+        tag(map.items, makeItem(heatLabel,
+                                strings::heat() + " " + dbOne(readings.tubeInput),
+                                strings::heatEn(),
+                                0,
+                                false));
         map.items.push_back(makeItem(threshold,
                                      strings::thresholdLabel() + " " + shownFrom(readings.tubeThreshold),
                                      strings::thresholdLabelEn(),
@@ -233,27 +321,17 @@ SceneMap buildMap(juce::Rectangle<int> local, const Readings& readings)
                                      strings::timeLabelEn(),
                                      17,
                                      false));
-        map.items.push_back(makeItem(ratio,
+        map.items.push_back(makeItem(ratioLabel,
                                      strings::ratioNow() + " " + juce::String(readings.ratioNow, 1) + " : 1",
                                      strings::ratioNowEn(),
                                      18,
                                      true));
+        addSolid(map, map.tube);
+        addSolid(map, map.heatBar);
+        addSolid(map, map.ratioBar);
     }
 
     return map;
-}
-
-juce::Rectangle<int> textBoundsFor(const Item& item)
-{
-    auto bounds = item.bounds;
-
-    if (item.role == 6)
-        return bounds.removeFromBottom(46);
-
-    if (item.role == 15 || item.role == 18)
-        return bounds.removeFromTop(46);
-
-    return bounds;
 }
 
 void paintText(juce::Graphics& g, const Item& item, juce::Colour accent)
@@ -261,9 +339,15 @@ void paintText(juce::Graphics& g, const Item& item, juce::Colour accent)
     if (item.primary.isEmpty() && item.secondary.isEmpty())
         return;
 
-    const auto plate = textBoundsFor(item);
-    const bool chip = item.role > 1 && item.role != 6 && item.role != 15 && item.role != 18;
+    if (item.role == 0)
+    {
+        std::fprintf(stderr, "paint role0 %d %d %d %d [%s]\n", item.bounds.getX(), item.bounds.getY(), item.bounds.getWidth(), item.bounds.getHeight(), item.primary.toRawUTF8());
+        g.setColour(juce::Colours::green);
+        g.fillRect(item.bounds);
+    }
+
     const bool dot = item.role >= 9 && item.role <= 13;
+    const auto plate = item.bounds;
 
     if (dot)
     {
@@ -273,28 +357,29 @@ void paintText(juce::Graphics& g, const Item& item, juce::Colour accent)
         g.setColour(item.locked ? kLine : accent);
         g.drawEllipse(circle, 1.4f);
     }
-    else if (chip)
+    else if (item.framed)
     {
         auto rounded = plate.toFloat().reduced(0.5f);
         g.setColour(item.locked ? juce::Colours::black.withAlpha(0.25f) : accent.withAlpha(0.10f));
-        g.fillRoundedRectangle(rounded, 8.0f);
+        g.fillRoundedRectangle(rounded, 9.0f);
         g.setColour(item.locked ? kLine : accent.withAlpha(0.9f));
-        g.drawRoundedRectangle(rounded, 8.0f, 1.3f);
+        g.drawRoundedRectangle(rounded, 9.0f, 1.3f);
     }
 
-    const auto first = fitLine(item.primary, item.preferred, item.minimum, plate.getWidth(), 8);
-    const auto second = fitLine(item.secondary, item.preferredSecondary, item.minimumSecondary, plate.getWidth(), 8);
+    const auto content = item.content();
+    const auto first = fitLine(item.primary, item.preferred, item.minimum, content.getWidth(), 0);
+    const auto second = fitLine(item.secondary, item.preferredSecondary, item.minimumSecondary, content.getWidth(), 0);
 
     if (item.secondary.isEmpty())
     {
         g.setColour(item.locked ? kMuted : kText);
         g.setFont(interfaceFont(first.size));
-        g.drawText(item.primary, plate, juce::Justification::centred, false);
+        g.drawText(item.primary, content, juce::Justification::centred, false);
         return;
     }
 
-    auto area = plate;
-    auto top = area.removeFromTop(juce::roundToInt(first.size + 3.0f));
+    auto area = content;
+    auto top = area.removeFromTop(juce::roundToInt(first.size + 2.0f));
     g.setColour(item.locked ? kMuted : kText);
     g.setFont(interfaceFont(first.size));
     g.drawText(item.primary, top, juce::Justification::centred, false);
@@ -458,14 +543,14 @@ void drawNeedle(juce::Graphics& g, const SceneMap& map, const Readings& readings
         if (item.role == 3)
             valve = item.bounds.toFloat();
 
-    const float pipeY = valve.getCentreY();
-    const float spoutX = cup.getCentreX();
-    juce::ColourGradient chrome(juce::Colour(0xfff7f9fb), pipeY, pipeY, juce::Colour(0xff8e98a3), spoutX, pipeY, false);
+    const float pipeY = map.pipe.getCentreY();
+    const float spoutX = map.spout.getCentreX();
+    juce::ColourGradient chrome(juce::Colour(0xfff7f9fb), map.pipe.getX(), pipeY, juce::Colour(0xff8e98a3), map.pipe.getRight(), pipeY, false);
     g.setGradientFill(chrome);
-    g.fillRoundedRectangle(valve.getX() - 78.0f, pipeY - 9.0f, spoutX - valve.getX() + 10.0f, 18.0f, 9.0f);
-    g.fillRoundedRectangle(spoutX - 10.0f, pipeY - 4.0f, 20.0f, cup.getY() - pipeY + 16.0f, 9.0f);
+    g.fillRoundedRectangle(map.pipe, 9.0f);
+    g.fillRoundedRectangle(map.spout, 9.0f);
     g.setColour(juce::Colours::white.withAlpha(0.55f));
-    g.drawLine(valve.getX() - 60.0f, pipeY - 4.0f, spoutX - 16.0f, pipeY - 4.0f, 1.5f);
+    g.drawLine(map.pipe.getX() + 8.0f, pipeY - 4.0f, spoutX - 16.0f, pipeY - 4.0f, 1.5f);
     g.fillEllipse(spoutX - 14.0f, pipeY - 14.0f, 28.0f, 28.0f);
 
     const float steps[] = { 1.0f, 1.5f, 2.0f, 4.0f, 8.0f, 1000.0f };
@@ -512,13 +597,6 @@ void drawNeedle(juce::Graphics& g, const SceneMap& map, const Readings& readings
     g.drawRoundedRectangle(cup, 16.0f, 2.0f);
     g.fillEllipse(cup.getX() + 8.0f, cup.getY() - 6.0f, cup.getWidth() - 16.0f, 16.0f);
 
-    for (int tick = 0; tick <= 4; ++tick)
-    {
-        const float y = juce::jmap(static_cast<float>(tick), 0.0f, 4.0f, cup.getY() + 18.0f, cup.getBottom() - 16.0f);
-        g.setColour(kMuted.withAlpha(0.85f));
-        g.drawLine(cup.getRight() - 18.0f, y, cup.getRight() - 7.0f, y, 1.2f);
-    }
-
     const float dashes[] = { 5.0f, 4.0f };
     juce::Path mark;
     mark.startNewSubPath(cup.getX() + 4.0f, markY);
@@ -559,83 +637,98 @@ void drawNeedle(juce::Graphics& g, const SceneMap& map, const Readings& readings
     g.strokePath(stream, juce::PathStrokeType(4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
+juce::Path jaggedBolt(juce::Point<float> from, juce::Point<float> to, float jag, int seed)
+{
+    juce::Random random(seed);
+    juce::Path path;
+    path.startNewSubPath(from);
+    const int steps = 8;
+
+    for (int step = 1; step < steps; ++step)
+    {
+        const float t = static_cast<float>(step) / static_cast<float>(steps);
+        auto point = from + (to - from) * t;
+        point.y += (random.nextFloat() * 2.0f - 1.0f) * jag * std::sin(t * juce::MathConstants<float>::pi);
+        path.lineTo(point);
+    }
+
+    path.lineTo(to);
+    return path;
+}
+
 void drawSpark(juce::Graphics& g, juce::Rectangle<int> local, const SceneMap& map, const Readings& readings)
 {
     const auto accent = kModeColour[2];
-    juce::Rectangle<float> charge;
-    juce::Rectangle<float> release;
+    auto coil = map.coil;
+    auto toroid = map.toroid;
+    g.setColour(juce::Colour(0xff1a1420));
+    g.fillRoundedRectangle(coil.withY(coil.getBottom() - 8.0f).withHeight(16.0f).expanded(10.0f, 0.0f), 4.0f);
 
-    for (const auto& item : map.items)
+    const int turns = 12;
+
+    for (int turn = 0; turn < turns; ++turn)
     {
-        if (item.role == 6)
-            charge = item.bounds.toFloat();
-        else if (item.role == 8)
-            release = item.bounds.toFloat();
-    }
-
-    const float lift = juce::jmap(readings.fetInput, 0.0f, 48.0f, 0.0f, 26.0f);
-    auto coil = charge.withTrimmedBottom(50.0f).translated(0.0f, -lift).reduced(6.0f, 0.0f);
-    g.setColour(juce::Colour(0xff241c28));
-    g.fillRoundedRectangle(charge.removeFromBottom(48.0f).translated(0.0f, 0.0f).reduced(4.0f, 2.0f), 8.0f);
-
-    for (int turn = 0; turn < 9; ++turn)
-    {
-        const float y = coil.getBottom() - 8.0f - static_cast<float>(turn) * (coil.getHeight() / 9.0f);
-        const float widen = 1.0f - std::abs(static_cast<float>(turn) - 4.0f) * 0.07f;
-        const float turnWidth = (coil.getWidth() + 20.0f) * widen;
-        auto turnRect = juce::Rectangle<float>(coil.getCentreX() - turnWidth * 0.5f, y, turnWidth, 16.0f);
-        juce::ColourGradient copper(juce::Colour(0xfff0c09a), turnRect.getX(), turnRect.getY(), juce::Colour(0xff7a3e24), turnRect.getRight(), turnRect.getBottom(), false);
+        const float y = coil.getBottom() - 10.0f - static_cast<float>(turn) * ((coil.getHeight() - 16.0f) / static_cast<float>(turns - 1));
+        const float widen = 0.72f + 0.28f * std::sin(static_cast<float>(turn) / static_cast<float>(turns - 1) * juce::MathConstants<float>::pi);
+        const float turnWidth = coil.getWidth() * widen;
+        auto turnRect = juce::Rectangle<float>(coil.getCentreX() - turnWidth * 0.5f, y, turnWidth, 15.0f);
+        juce::ColourGradient copper(juce::Colour(0xffffd7b0), turnRect.getX(), turnRect.getCentreY(), juce::Colour(0xff6a341c), turnRect.getRight(), turnRect.getCentreY(), false);
         g.setGradientFill(copper);
         g.fillEllipse(turnRect);
-        g.setColour(juce::Colour(0xff4d2616).withAlpha(0.8f));
-        g.drawEllipse(turnRect.reduced(3.0f, 3.0f), 1.2f);
+        g.setColour(juce::Colour(0xff3d1e10));
+        g.drawEllipse(turnRect.reduced(2.0f, 3.0f), 1.1f);
     }
 
-    auto toroid = juce::Rectangle<float>(coil.getX() - 22.0f, coil.getY() - 30.0f, coil.getWidth() + 44.0f, 36.0f);
-    juce::ColourGradient silver(juce::Colour(0xfff8fbff), toroid.getX(), toroid.getY(), juce::Colour(0xff7f8b99), toroid.getCentreX(), toroid.getBottom(), false);
+    g.setColour(juce::Colour(0xff2a160e));
+    g.fillRect(coil.getCentreX() - 5.0f, coil.getY() + 8.0f, 10.0f, coil.getHeight() - 16.0f);
+
+    juce::ColourGradient silver(juce::Colour(0xfff8fbff), toroid.getX(), toroid.getCentreY(), juce::Colour(0xff7c8794), toroid.getRight(), toroid.getCentreY(), false);
     g.setGradientFill(silver);
     g.fillEllipse(toroid);
     g.setColour(kBackground);
-    g.fillEllipse(toroid.reduced(toroid.getWidth() * 0.30f, toroid.getHeight() * 0.18f));
-    g.setColour(juce::Colour(0xffd5dde6));
-    g.drawEllipse(toroid.reduced(4.0f, 3.0f), 2.0f);
+    g.fillEllipse(toroid.reduced(toroid.getWidth() * 0.28f, toroid.getHeight() * 0.22f));
+    g.setColour(juce::Colour(0xffe7edf4));
+    g.drawEllipse(toroid.reduced(3.0f, 2.0f), 2.0f);
 
-    const float poleX = release.getX() - 18.0f;
     g.setColour(juce::Colour(0xffd5dbe3));
-    g.fillRoundedRectangle(poleX - 5.0f, toroid.getCentreY(), 10.0f, release.getBottom() - toroid.getCentreY(), 4.0f);
+    g.fillRoundedRectangle(map.pole, 4.0f);
     g.setGradientFill(silver);
-    g.fillEllipse(poleX - 16.0f, toroid.getCentreY() - 16.0f, 32.0f, 32.0f);
+    g.fillEllipse(map.sphere);
 
-    for (int ball = 0; ball < 4; ++ball)
+    for (int ball = 0; ball < 3; ++ball)
+        g.fillEllipse(map.pole.getCentreX() - 22.0f + static_cast<float>(ball) * 14.0f, map.pole.getBottom() - 8.0f, 11.0f, 11.0f);
+
+    const bool striking = readings.grDb > 0.4f || readings.arc > 0.04f;
+    const int ratioStep = juce::jlimit(0, 4, readings.ratioIndex);
+    const int forks = striking ? 2 + ratioStep : 0;
+    const float thickness = striking ? 2.4f + static_cast<float>(ratioStep) * 1.35f : 1.05f;
+    const float jag = striking ? 16.0f + static_cast<float>(ratioStep) * 4.0f : 1.5f;
+    const auto from = juce::Point<float>(toroid.getRight() - 6.0f, toroid.getCentreY());
+    const auto to = map.sphere.getCentre();
+    const int seed = 41 + juce::roundToInt(readings.phase * 6.0f) + ratioStep * 17;
+    auto mainBolt = jaggedBolt(from, to, jag, seed);
+    g.setColour(accent.withAlpha(striking ? 0.45f : 0.22f));
+    g.strokePath(mainBolt, juce::PathStrokeType(thickness + (striking ? 3.0f : 0.0f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour((striking ? juce::Colour(0xfff7f4ff) : accent).withAlpha(striking ? 0.95f : 0.45f));
+    g.strokePath(mainBolt, juce::PathStrokeType(striking ? 1.8f : 1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    for (int fork = 0; fork < forks; ++fork)
     {
-        const float x = poleX - 28.0f + static_cast<float>(ball) * 16.0f;
-        g.fillEllipse(x, release.getBottom() + 6.0f, 12.0f, 12.0f);
+        const float t = 0.35f + 0.12f * static_cast<float>(fork);
+        auto start = from + (to - from) * t;
+        auto end = start + juce::Point<float>(18.0f + static_cast<float>(fork) * 8.0f, (fork % 2 == 0 ? -1.0f : 1.0f) * (22.0f + static_cast<float>(ratioStep) * 6.0f));
+        auto branch = jaggedBolt(start, end, jag * 0.6f, seed + 9 + fork);
+        g.setColour(accent.withAlpha(0.85f));
+        g.strokePath(branch, juce::PathStrokeType(juce::jmax(1.2f, thickness * 0.45f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour(juce::Colour(0xfffff7ea).withAlpha(0.9f));
+        g.fillEllipse(end.x - 2.0f, end.y - 2.0f, 4.0f, 4.0f);
     }
 
-    juce::Random random(19 + juce::roundToInt(readings.phase * 8.0f));
-    juce::Point<float> point(toroid.getRight() - 8.0f, toroid.getCentreY());
-    juce::Path bolt;
-    bolt.startNewSubPath(point);
-
-    while (point.x < poleX - 18.0f)
-    {
-        point.x += 18.0f + random.nextFloat() * 12.0f;
-        point.y += random.nextFloat() * 36.0f - 18.0f;
-        bolt.lineTo(point);
-    }
-
-    bolt.lineTo(poleX, toroid.getCentreY());
-    const float energy = juce::jlimit(0.35f, 1.0f, 0.35f + readings.arc + juce::jmin(0.5f, readings.grDb / 18.0f));
-    g.setColour(accent.withAlpha(0.45f * energy));
-    g.strokePath(bolt, juce::PathStrokeType(10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour(juce::Colour(0xfff7f3ff).withAlpha(0.95f));
-    g.strokePath(bolt, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     juce::ignoreUnused(local);
 }
 
-void drawSlimMeter(juce::Graphics& g, juce::Rectangle<float> area, float norm, juce::Colour accent)
+void drawSlimMeter(juce::Graphics& g, juce::Rectangle<float> bar, float norm, juce::Colour accent)
 {
-    auto bar = area.withTrimmedTop(50.0f).withSizeKeepingCentre(16.0f, juce::jmax(40.0f, area.getHeight() - 58.0f));
     g.setColour(kTrack);
     g.fillRoundedRectangle(bar, 7.0f);
     const float clamped = juce::jlimit(0.0f, 1.0f, norm);
@@ -651,21 +744,12 @@ void drawSlimMeter(juce::Graphics& g, juce::Rectangle<float> area, float norm, j
 void drawTube(juce::Graphics& g, juce::Rectangle<int> local, const SceneMap& map, const Readings& readings)
 {
     const auto accent = kModeColour[3];
-    juce::Rectangle<float> heat;
-    juce::Rectangle<float> ratio;
-
-    for (const auto& item : map.items)
-    {
-        if (item.role == 15)
-            heat = item.bounds.toFloat();
-        else if (item.role == 18)
-            ratio = item.bounds.toFloat();
-    }
-
+    auto heat = map.heatBar;
+    auto ratio = map.ratioBar;
     drawSlimMeter(g, heat, juce::jmap(juce::jlimit(-20.0f, 20.0f, readings.tubeInput), -20.0f, 20.0f, 0.08f, 1.0f), accent);
     drawSlimMeter(g, ratio, juce::jmap(juce::jlimit(1.0f, 6.0f, readings.ratioNow), 1.0f, 6.0f, 0.12f, 1.0f), accent);
 
-    auto glass = juce::Rectangle<float>(local.getWidth() * 0.40f, local.getHeight() * 0.10f, local.getWidth() * 0.20f, local.getHeight() * 0.64f);
+    auto glass = map.tube;
     const float glow = juce::jlimit(0.25f, 1.0f, 0.3f + readings.glow + juce::jmin(0.45f, std::abs(readings.grDb) / 12.0f));
     g.setColour(accent.withAlpha(0.22f * glow));
     g.fillEllipse(glass.expanded(48.0f, 28.0f));
@@ -727,7 +811,7 @@ void drawTube(juce::Graphics& g, juce::Rectangle<int> local, const SceneMap& map
     g.strokePath(wave(heat.getRight() + 8.0f, glass.getX() - heat.getRight() - 16.0f, amplitude), juce::PathStrokeType(2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     g.setColour(accent.withAlpha(0.55f));
     g.strokePath(wave(glass.getRight() + 10.0f, ratio.getX() - glass.getRight() - 18.0f, amplitude / juce::jmax(1.0f, readings.ratioNow)), juce::PathStrokeType(2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    juce::ignoreUnused(map);
+    juce::ignoreUnused(local);
 }
 
 const char* roleParameter(int role)
@@ -806,10 +890,25 @@ std::string SceneView::layoutProblems() const
         if (! item.fits())
             problems += "text " + item.primary.toStdString() + " / " + item.secondary.toStdString() + "\n";
 
+        const bool hasText = item.primary.isNotEmpty() || item.secondary.isNotEmpty();
+
+        if (hasText)
+            for (const auto& solid : map.solids)
+                if (item.bounds.intersects(enclose(solid)))
+                    problems += "label on object " + item.primary.toStdString() + "\n";
+
         for (size_t j = i + 1; j < map.items.size(); ++j)
-            if (item.bounds.intersects(map.items[j].bounds))
-                problems += "overlap " + std::to_string(item.role) + " " + std::to_string(map.items[j].role) + "\n";
+        {
+            const bool otherText = map.items[j].primary.isNotEmpty() || map.items[j].secondary.isNotEmpty();
+
+            if (hasText && otherText && item.bounds.intersects(map.items[j].bounds))
+                problems += "overlap " + item.primary.toStdString() + " / " + map.items[j].primary.toStdString() + "\n";
+        }
     }
+
+    for (const auto& solid : map.solids)
+        if (! getLocalBounds().contains(enclose(solid)))
+            problems += "object outside\n";
 
     return problems;
 }
@@ -956,6 +1055,8 @@ void SceneView::paint(juce::Graphics& g)
     readings.phase = phase;
 
     auto local = getLocalBounds();
+    g.setColour(juce::Colours::red);
+    g.fillAll();
     const auto map = buildMap(local, readings);
     drawFloor(g, local);
 
@@ -970,6 +1071,25 @@ void SceneView::paint(juce::Graphics& g)
 
     for (const auto& item : map.items)
         paintText(g, item, kModeColour[readings.mode]);
+
+    if (readings.mode == 2)
+    {
+        const auto clip = g.getClipBounds();
+        std::fprintf(stderr, "clip %d %d %d %d\n", clip.getX(), clip.getY(), clip.getWidth(), clip.getHeight());
+    }
+
+    g.fillAll(juce::Colours::red);
+
+    if (readings.mode == 2)
+    {
+        std::fprintf(stderr, "scene %d %d %d %d\n", local.getX(), local.getY(), local.getWidth(), local.getHeight());
+        std::fprintf(stderr, "coil %.0f %.0f %.0f %.0f toroid %.0f %.0f %.0f %.0f pole %.0f %.0f %.0f %.0f\n",
+                     map.coil.getX(), map.coil.getY(), map.coil.getWidth(), map.coil.getHeight(),
+                     map.toroid.getX(), map.toroid.getY(), map.toroid.getWidth(), map.toroid.getHeight(),
+                     map.pole.getX(), map.pole.getY(), map.pole.getWidth(), map.pole.getHeight());
+        for (const auto& item : map.items)
+            std::fprintf(stderr, "item role %d %d %d %d %d text %s\n", item.role, item.bounds.getX(), item.bounds.getY(), item.bounds.getWidth(), item.bounds.getHeight(), item.primary.toRawUTF8());
+    }
 }
 
 int hitRole(juce::Rectangle<int> local, juce::Point<float> position, const Readings& readings)

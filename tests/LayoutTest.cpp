@@ -163,7 +163,7 @@ void runSnapshot(const std::string& directory)
         setRaw(processor, params::fetOutput, 3.0f);
         setRaw(processor, params::fetAttack, 300.0f);
         setRaw(processor, params::fetRelease, 250.0f);
-        setRaw(processor, params::fetRatio, 0.0f);
+        setRaw(processor, params::fetRatio, shot.mode == 2 ? 2.0f : 0.0f);
         setRaw(processor, params::vmuThreshold, -22.0f);
         setRaw(processor, params::vmuTime, 2.0f);
         setRaw(processor, params::vmuOutput, 3.5f);
