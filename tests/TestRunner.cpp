@@ -22,12 +22,14 @@ void runStability();
 void runModeSwitch();
 void runVisualContract();
 void runPerf();
+void runLayout();
+void runSnapshot(const std::string& directory);
 }
 
 namespace
 {
 
-int runNamed(const std::string& name)
+int runNamed(const std::string& name, const std::string& extra)
 {
     const int before = squeeze::test::failureCount();
 
@@ -61,6 +63,10 @@ int runNamed(const std::string& name)
             squeeze::test::runVisualContract();
         else if (name == "perf")
             squeeze::test::runPerf();
+        else if (name == "layout")
+            squeeze::test::runLayout();
+        else if (name == "snapshot")
+            squeeze::test::runSnapshot(extra);
         else
         {
             std::cerr << "Unknown test \"" << name << "\"\n";
@@ -94,16 +100,17 @@ int main(int argc, char** argv)
 
     if (requested == "all")
     {
-        int status = runNamed("params");
+        int status = runNamed("params", {});
 
         if (status == 0)
-            status = runNamed("state");
+            status = runNamed("state", {});
 
         if (status == 0)
-            status = runNamed("process");
+            status = runNamed("process", {});
 
         return status;
     }
 
-    return runNamed(requested);
+    const std::string extra = argc > 2 ? argv[2] : "";
+    return runNamed(requested, extra);
 }

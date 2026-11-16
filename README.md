@@ -42,7 +42,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 테스트
 
-`squeeze_tests`가 ctest 이름 세 개를 제공한다.
+`squeeze_tests`가 아래 ctest 이름을 제공한다.
 
 | 이름 | 확인하는 것 |
 |---|---|
@@ -60,5 +60,6 @@ ctest --test-dir build -C Release --output-on-failure
 | `mode_switch` | 전환 중 지연 불변, 샘플 점프 없음 |
 | `visual_contract` | FET 어택 측정 샘플이 설정과 ±1 (192 kHz) |
 | `perf` | 모드별 ns/sample 보고 |
+| `layout` | 1100–1760에서 글자와 조작 영역이 겹치지 않고, 잠긴 대상은 값이 변하지 않음 |
 
-한 가지만 돌릴 때는 `./build/squeeze_tests params`처럼 이름을 넘긴다. 다중 구성 생성기에서는 Release 산출물 경로를 쓴다.
+한 가지만 돌릴 때는 `./build/squeeze_tests params`처럼 이름을 넘긴다. 다중 구성 생성기에서는 Release 산출물 경로를 쓴다. 네 모드의 1280×660 화면은 `./build/squeeze_tests snapshot <폴더>`로 저장한다. 이 명령은 ctest에 넣지 않는다.
