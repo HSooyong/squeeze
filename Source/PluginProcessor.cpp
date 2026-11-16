@@ -1,10 +1,12 @@
 #include "PluginProcessor.h"
 
-#include "Latency.h"
+#include "MathUtil.h"
 #include "Parameters.h"
 #include "PluginEditor.h"
+#include "Tunables.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace squeeze
 {
@@ -17,23 +19,160 @@ SqueezeProcessor::SqueezeProcessor()
 {
     modeParameter = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter(params::mode));
     jassert(modeParameter != nullptr);
+
+    auto raw = [this](const char* id) { return apvts.getRawParameterValue(id); };
+    modeRaw = raw(params::mode);
+    osRaw = raw(params::osFactor);
+    levelMatchRaw = raw(params::abLevelMatch);
+    optoPeakRaw = raw(params::optoPeakRed);
+    optoGainRaw = raw(params::optoGain);
+    optoLimitRaw = raw(params::optoLimit);
+    vcaThresholdRaw = raw(params::vcaThreshold);
+    vcaRatioRaw = raw(params::vcaRatio);
+    vcaOutputRaw = raw(params::vcaOutput);
+    fetInputRaw = raw(params::fetInput);
+    fetOutputRaw = raw(params::fetOutput);
+    fetAttackRaw = raw(params::fetAttack);
+    fetReleaseRaw = raw(params::fetRelease);
+    fetRatioRaw = raw(params::fetRatio);
+    fetAllRaw = raw(params::fetAllEnabled);
+    vmuInputRaw = raw(params::vmuInput);
+    vmuThresholdRaw = raw(params::vmuThreshold);
+    vmuTimeRaw = raw(params::vmuTime);
+    vmuOutputRaw = raw(params::vmuOutput);
 }
 
 SqueezeProcessor::~SqueezeProcessor() = default;
 
+EngineTargets SqueezeProcessor::readTargets() const noexcept
+{
+    EngineTargets targets;
+    targets.mode = modeFromIndex(juce::roundToInt(modeRaw->load()));
+    targets.levelMatch = levelMatchRaw->load() >= 0.5f;
+    targets.optoPeakReduction = optoPeakRaw->load();
+    targets.optoOutputDb = optoGainRaw->load();
+    targets.optoLimit = optoLimitRaw->load();
+    targets.vcaThresholdDb = vcaThresholdRaw->load();
+    targets.vcaRatio = vcaRatioRaw->load();
+    targets.vcaOutputDb = vcaOutputRaw->load();
+    targets.fetInputDb = fetInputRaw->load() - 24.0f;
+    targets.fetOutputDb = fetOutputRaw->load();
+    targets.fetAttackSeconds = fetAttackRaw->load() * 1.0e-6f;
+    targets.fetReleaseSeconds = fetReleaseRaw->load() * 1.0e-3f;
+    targets.fetRatioIndex = fetRatioRaw->load();
+    targets.fetAllEnabled = fetAllRaw->load() >= 0.5f;
+    targets.vmuInputDb = vmuInputRaw->load();
+    targets.vmuThresholdDb = vmuThresholdRaw->load();
+    targets.vmuOutputDb = vmuOutputRaw->load();
+    targets.vmuTimeIndex = vmuTimeRaw->load();
+    return targets;
+}
+
 void SqueezeProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    engine.prepare(sampleRate, samplesPerBlock);
-    engine.reset();
+    preparedSamples = std::max(samplesPerBlock, 8192);
+    const int channels = std::max(1, getTotalNumOutputChannels());
+    dryLeft.assign(static_cast<size_t>(preparedSamples), 0.0f);
+    dryRight.assign(static_cast<size_t>(preparedSamples), 0.0f);
+    colorDrive.assign(static_cast<size_t>(preparedSamples), 0.0f);
 
-    const int modeIndex = modeParameter != nullptr ? modeParameter->getIndex() : 0;
-    engine.setMode(modeFromIndex(modeIndex));
-    setLatencySamples(kReportedLatencySamples);
+    engine.prepare(sampleRate, channels);
+    colorStage.prepare(sampleRate, preparedSamples, channels);
+    engine.snapTo(readTargets());
+    activeOversampling = std::clamp(juce::roundToInt(osRaw->load()), 0, 2);
+    setLatencySamples(colorStage.latencyForChoice(activeOversampling));
 }
 
 void SqueezeProcessor::releaseResources()
 {
     engine.reset();
+    colorStage.reset();
+}
+
+void SqueezeProcessor::publishFrame(const VisualFrame& frame) noexcept
+{
+    latestFrame = frame;
+    publishedGr.store(frame.grDb);
+    publishedIn.store(frame.inDb);
+    publishedOut.store(frame.outDb);
+
+    int start1 = 0;
+    int size1 = 0;
+    int start2 = 0;
+    int size2 = 0;
+    visualFifo.prepareToWrite(1, start1, size1, start2, size2);
+    if (size1 <= 0)
+        return;
+
+    visualFrames[static_cast<size_t>(start1)] = frame;
+    visualFifo.finishedWrite(1);
+}
+
+bool SqueezeProcessor::popVisualFrame(VisualFrame& frame) noexcept
+{
+    int start1 = 0;
+    int size1 = 0;
+    int start2 = 0;
+    int size2 = 0;
+    visualFifo.prepareToRead(1, start1, size1, start2, size2);
+    if (size1 <= 0)
+        return false;
+
+    frame = visualFrames[static_cast<size_t>(start1)];
+    visualFifo.finishedRead(1);
+    return true;
+}
+
+bool SqueezeProcessor::hasBadAudioState() const noexcept
+{
+    return engine.hasBadState() || colorStage.hasBadState();
+}
+
+int SqueezeProcessor::oversamplingLatencySamples() const noexcept
+{
+    return colorStage.latencyForChoice(activeOversampling);
+}
+
+void SqueezeProcessor::processChunk(float* const* channels, int numChannels, int numSamples, const EngineTargets& targets, int oversamplingIndex)
+{
+    for (int index = 0; index < numSamples; ++index)
+    {
+        dryLeft[static_cast<size_t>(index)] = channels[0][index];
+        if (numChannels > 1)
+            dryRight[static_cast<size_t>(index)] = channels[1][index];
+    }
+
+    VisualFrame frame;
+    engine.process(channels, colorDrive.data(), numChannels, numSamples, targets, frame);
+    colorStage.process(channels, colorDrive.data(), numChannels, numSamples, oversamplingIndex);
+
+    float* dryPointers[2] = { dryLeft.data(), numChannels > 1 ? dryRight.data() : dryLeft.data() };
+    engine.applyLevelMatch(dryPointers, channels, numChannels, numSamples, targets.levelMatch);
+
+    float inPeak = 0.0f;
+    float outPeak = 0.0f;
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        for (int index = 0; index < numSamples; ++index)
+        {
+            float sample = channels[channel][index];
+            sample = clampFloat(sample, -tunables::outputSafety, tunables::outputSafety);
+            channels[channel][index] = sample;
+            inPeak = std::max(inPeak, std::fabs(dryPointers[channel][index]));
+            outPeak = std::max(outPeak, std::fabs(sample));
+        }
+    }
+
+    frame.inDb = linearToDb(inPeak);
+    frame.outDb = linearToDb(outPeak);
+    frame.lmTrimDb = engine.levelMatchTrimDb();
+    const float difference = colorStage.lastDifferenceRms();
+    if (targets.mode == Mode::fet)
+        frame.fetGrit = difference;
+    else if (targets.mode == Mode::variMu)
+        frame.vmuHarmonics = difference;
+
+    publishFrame(frame);
 }
 
 bool SqueezeProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -52,9 +191,6 @@ void SqueezeProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
     juce::ScopedNoDenormals noDenormals;
     juce::ignoreUnused(midi);
 
-    const int modeIndex = modeParameter != nullptr ? modeParameter->getIndex() : 0;
-    engine.setMode(modeFromIndex(modeIndex));
-
     const auto numInputChannels = getTotalNumInputChannels();
     const auto numOutputChannels = getTotalNumOutputChannels();
     const auto numSamples = buffer.getNumSamples();
@@ -62,7 +198,26 @@ void SqueezeProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
     for (int channel = numInputChannels; channel < numOutputChannels; ++channel)
         buffer.clear(channel, 0, numSamples);
 
-    engine.process(buffer.getArrayOfWritePointers(), numInputChannels, numSamples);
+    const int oversamplingIndex = std::clamp(juce::roundToInt(osRaw->load()), 0, 2);
+    if (oversamplingIndex != activeOversampling)
+    {
+        activeOversampling = oversamplingIndex;
+        setLatencySamples(colorStage.latencyForChoice(activeOversampling));
+    }
+
+    const EngineTargets targets = readTargets();
+    const int channels = std::max(1, numInputChannels);
+    int offset = 0;
+    while (offset < numSamples)
+    {
+        const int count = std::min(preparedSamples > 0 ? preparedSamples : numSamples, numSamples - offset);
+        float* pointers[2] = {
+            buffer.getWritePointer(0) + offset,
+            channels > 1 ? buffer.getWritePointer(1) + offset : buffer.getWritePointer(0) + offset,
+        };
+        processChunk(pointers, channels, count, targets, oversamplingIndex);
+        offset += count;
+    }
 }
 
 void SqueezeProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -70,10 +225,22 @@ void SqueezeProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer, ju
     juce::ScopedNoDenormals noDenormals;
     midi.clear();
 
-    // Bypass keeps the same reported latency as processBlock. M1 latency is zero,
-    // so the samples already in the buffer stay aligned.
-    for (int channel = getMainBusNumInputChannels(); channel < getTotalNumOutputChannels(); ++channel)
-        buffer.clear(channel, 0, buffer.getNumSamples());
+    const int channels = std::max(1, getTotalNumInputChannels());
+    const int oversamplingIndex = std::clamp(juce::roundToInt(osRaw->load()), 0, 2);
+    if (oversamplingIndex != activeOversampling)
+    {
+        activeOversampling = oversamplingIndex;
+        setLatencySamples(colorStage.latencyForChoice(activeOversampling));
+    }
+
+    colorStage.process(buffer.getArrayOfWritePointers(), nullptr, channels, buffer.getNumSamples(), oversamplingIndex);
+
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        float* samples = buffer.getWritePointer(channel);
+        for (int index = 0; index < buffer.getNumSamples(); ++index)
+            samples[index] = clampFloat(samples[index], -tunables::outputSafety, tunables::outputSafety);
+    }
 }
 
 juce::AudioProcessorEditor* SqueezeProcessor::createEditor()

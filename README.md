@@ -2,7 +2,7 @@
 
 Bearfield 교육용 컴프레서. 하나의 플러그인에서 네 가지 압축 방식(LAMP, NEEDLE, SPARK, TUBE)을 바꿔 가며 동작 원리를 본다.
 
-M1은 빌드 골격, 파라미터, 상태 저장, 자리 표시 에디터, 단위 테스트까지다. 오디오 처리는 통과(pass-through)다. 모델 계산, 오버샘플링, 레벨 매칭은 다음 마일스톤이다.
+M1은 빌드 골격, 파라미터, 상태 저장, 자리 표시 에디터다. M2는 네 모델의 게인 법칙과 시간 동작, 오버샘플링, 레벨 매칭, 화면용 측정값이다. 제안 계수는 `Source/Core/Tunables.h`에 있다.
 
 식별자: 회사 Bearfield, 제조사 코드 `Brfd`, 플러그인 코드 `SqzE`, 번들 `com.bearfield.SQUEEZE`.
 
@@ -46,8 +46,19 @@ ctest --test-dir build -C Release --output-on-failure
 
 | 이름 | 확인하는 것 |
 |---|---|
-| `params` | 파라미터 ID, 순서, 범위, 기본값, 로그 눈금, 표시 문자열, 창 크기 상수, 버스 레이아웃 |
-| `state` | 저장 후 복원, 모르는 키 무시, 없는 키는 기본값, 버전 0과 버전 없는 문서, History 50개 제한 |
-| `process` | 44.1–192 kHz, 모드 전환, 바이패스, 지연 0 유지, NaN 없음, 통과 처리 |
+| `params` | 파라미터 ID, 순서, 범위, 기본값, 로그 눈금, 표시 문자열, 창 크기 |
+| `state` | 저장 후 복원, 모르는 키, 없는 키의 기본값, 이전 버전 |
+| `process` | 44.1–192 kHz에서 유한한 출력, 모드를 바꿔도 지연이 같음 |
+| `static_curve` | 1 kHz 정상 상태 게인이 공통 곡선과 ±0.5 dB |
+| `timing_opto` | 어택 약 10 ms, 빠른 릴리즈, 긴 유지 후 느린 단이 두 배 이상 |
+| `timing_vca` | 10/20/30 dB 어택, 릴리즈 120 dB/s |
+| `timing_fet` | 96 kHz와 192 kHz에서 어택·릴리즈 ±15% |
+| `timing_varimu` | 여섯 시간 상수 ±20%, T5의 프로그램 의존 |
+| `null_bypass` | 게인 0에서 지연 보정 후 오차 ≤ −100 dBFS |
+| `level_match` | 서로 다른 두 설정의 라우드니스 차 ≤ 0.5 LU |
+| `stability` | 샘플 레이트·블록 크기, 60초 무작위 조작, 무음 후 비정상 부동소수 없음 |
+| `mode_switch` | 전환 중 지연 불변, 샘플 점프 없음 |
+| `visual_contract` | FET 어택 측정 샘플이 설정과 ±1 (192 kHz) |
+| `perf` | 모드별 ns/sample 보고 |
 
 한 가지만 돌릴 때는 `./build/squeeze_tests params`처럼 이름을 넘긴다. 다중 구성 생성기에서는 Release 산출물 경로를 쓴다.
