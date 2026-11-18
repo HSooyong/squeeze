@@ -1,0 +1,13 @@
+/build/
+/out/
+/cmake-build-*/
+.DS_Store
+*.user
+*.suo
+*.sdf
+.vs/
+.idea/
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
