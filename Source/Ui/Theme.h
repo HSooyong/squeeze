@@ -5,8 +5,8 @@
 namespace squeeze::ui
 {
 
-inline const juce::Colour kBackground { 0xff121418 };
-inline const juce::Colour kHeader { 0xff181b20 };
+inline const juce::Colour kBackground { 0xff16151a };
+inline const juce::Colour kHeader { 0xff16151a };
 inline const juce::Colour kText { 0xfff4f1ea };
 inline const juce::Colour kMuted { 0xff9a958c };
 inline const juce::Colour kLine { 0xff343a42 };

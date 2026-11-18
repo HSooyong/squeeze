@@ -8,17 +8,27 @@ M1은 빌드 골격, 파라미터, 상태 저장, 자리 표시 에디터다. M2
 
 네트워크, 프롬프트, 자연어 입력은 넣지 않는다.
 
-## macOS (arm64, macOS 14.7)
+## macOS에서 빌드하고 Logic에 설치
 
-Xcode, CMake 3.22 이상, git이 필요하다. JUCE 8.0.15는 구성 중에 받는다.
+Xcode, CMake 3.22 이상, git이 필요하다. JUCE 8.0.15는 구성 중에 받는다. 기본 맥 빌드는 arm64와 x86_64를 함께 담은 universal Release다.
 
 ```bash
-cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.7
+cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.7
 cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-포맷은 AU, VST3, Standalone이다. 맥에서 Audio Unit을 확인할 때는 `auval -v aufx SqzE Brfd`를 쓴다. 이 저장소의 CI는 그 명령을 실행하지 않는다.
+포맷은 AU, VST3, Standalone이다. 만든 번들을 사용자 플러그인 폴더에 복사한 뒤 Audio Unit을 검사한다.
+
+```bash
+cp -R build/SQUEEZE_artefacts/Release/AU/SQUEEZE.component ~/Library/Audio/Plug-Ins/Components/
+cp -R build/SQUEEZE_artefacts/Release/VST3/SQUEEZE.vst3 ~/Library/Audio/Plug-Ins/VST3/
+auval -v aufx SqzE Brfd
+```
+
+Logic을 다시 시작하면 Audio Units의 Bearfield 아래에 SQUEEZE가 나타난다. 서명은 Xcode의 ad-hoc 서명이다.
+
+GitHub Actions의 macOS 잡은 같은 universal AU/VST3를 만들고, 아티팩트 `SQUEEZE-macOS-universal`로 올린다. 그 잡은 pluginval strictness 5로 VST3도 검사한다.
 
 ## Linux
 
@@ -61,5 +71,6 @@ ctest --test-dir build -C Release --output-on-failure
 | `visual_contract` | FET 어택 측정 샘플이 설정과 ±1 (192 kHz) |
 | `perf` | 모드별 ns/sample 보고 |
 | `layout` | 1100–1760에서 글자와 조작 영역이 겹치지 않고, 잠긴 대상은 값이 변하지 않음 |
+| `ui_contract` | 화면의 게인 감소가 엔진 값과 같고, LEARN/METER/A-B/장면/창 너비가 상태에 저장된다 |
 
 한 가지만 돌릴 때는 `./build/squeeze_tests params`처럼 이름을 넘긴다. 다중 구성 생성기에서는 Release 산출물 경로를 쓴다. 네 모드의 1280×660 화면은 `./build/squeeze_tests snapshot <폴더>`로 저장한다. 이 명령은 ctest에 넣지 않는다.

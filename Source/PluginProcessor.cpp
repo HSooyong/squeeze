@@ -4,6 +4,7 @@
 #include "Parameters.h"
 #include "PluginEditor.h"
 #include "Tunables.h"
+#include "Ui/Scenes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -391,6 +392,235 @@ void SqueezeProcessor::setStateInformation(const void* data, int sizeInBytes)
 
     if (auto xml = getXmlFromBinary(data, sizeInBytes))
         applyStateXml(*xml);
+}
+
+namespace
+{
+
+bool sameSnapshot(const std::vector<ParameterSnapshot>& before, const std::vector<ParameterSnapshot>& after)
+{
+    if (before.size() != after.size())
+        return false;
+
+    for (size_t index = 0; index < before.size(); ++index)
+        if (before[index].id != after[index].id || std::abs(before[index].value - after[index].value) > 1.0e-3f)
+            return false;
+
+    return true;
+}
+
+juce::String modeName(int mode)
+{
+    switch (mode)
+    {
+        case 0: return "LAMP";
+        case 1: return "NEEDLE";
+        case 2: return "SPARK";
+        default: return "TUBE";
+    }
+}
+
+juce::String explainChange(const juce::String& id)
+{
+    if (id == params::optoPeakRed)
+        return "The lamp drives the cell harder, so more of the level is held back.";
+    if (id == params::optoGain || id == params::vcaOutput || id == params::fetOutput || id == params::vmuOutput)
+        return "Output makeup changed. Gain reduction stays with the input.";
+    if (id == params::optoLimit)
+        return "Compress holds a gentle curve. Limit holds the level much harder.";
+    if (id == params::vcaThreshold)
+        return "The line moved, so a different amount of the signal crosses it.";
+    if (id == params::vcaRatio)
+        return "Only 1 dB of every extra dB above the line is kept, divided by the ratio.";
+    if (id == params::fetInput)
+        return "Push the signal into the fixed line. The bolt catches what crosses it.";
+    if (id == params::fetAttack)
+        return "This is how long the bolt takes to grab the peak.";
+    if (id == params::fetRelease)
+        return "This is how long the bolt takes to let go.";
+    if (id == params::fetRatio)
+        return "A higher ratio makes the bolt thicker and holds peaks flatter.";
+    if (id == params::vmuInput)
+        return "More input heat drives the tube harder.";
+    if (id == params::vmuThreshold)
+        return "The tube starts easing the level at this point.";
+    if (id == params::vmuTime)
+        return "The time constant sets how quickly the tube warms and cools.";
+    if (id == params::mode)
+        return "Each mode is a different classic way of holding level back.";
+
+    return "The picture follows the engine.";
+}
+
+} // namespace
+
+void SqueezeProcessor::applySnapshot(const std::vector<ParameterSnapshot>& snapshot)
+{
+    for (const auto& item : snapshot)
+        if (auto* parameter = apvts.getParameter(item.id))
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(item.value));
+}
+
+void SqueezeProcessor::showToast(juce::String text)
+{
+    toastTextValue = std::move(text);
+    toastAtMs = juce::Time::currentTimeMillis();
+}
+
+void SqueezeProcessor::rememberHistory(juce::String change, juce::String sentence)
+{
+    auto state = getUiState();
+    HistoryEntry entry;
+    entry.time = juce::Time::getCurrentTime().formatted("%H:%M:%S");
+    const int mode = modeParameter != nullptr ? modeParameter->getIndex() : 0;
+    entry.mode = modeName(mode);
+    entry.change = std::move(change);
+    entry.sentence = std::move(sentence);
+    state.history.push_back(std::move(entry));
+    setUiState(std::move(state));
+}
+
+void SqueezeProcessor::beginGestureUndo()
+{
+    if (gestureOpen)
+        return;
+
+    gestureOpen = true;
+    gestureStart = snapshotParameters(apvts);
+}
+
+void SqueezeProcessor::commitGesture()
+{
+    if (! gestureOpen)
+        return;
+
+    gestureOpen = false;
+    const auto now = snapshotParameters(apvts);
+
+    if (sameSnapshot(gestureStart, now))
+        return;
+
+    undoStack.push_back(gestureStart);
+    if (undoStack.size() > 50)
+        undoStack.erase(undoStack.begin());
+
+    redoStack.clear();
+
+    juce::String changedId;
+    juce::String change;
+
+    for (size_t index = 0; index < now.size() && index < gestureStart.size(); ++index)
+    {
+        if (std::abs(now[index].value - gestureStart[index].value) <= 1.0e-3f)
+            continue;
+
+        changedId = now[index].id;
+        if (auto* parameter = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter(changedId)))
+            change = parameter->getName(40) + " " + parameter->getText(parameter->convertTo0to1(gestureStart[index].value), 16)
+                     + " -> " + parameter->getText(parameter->getValue(), 16);
+        else
+            change = changedId;
+    }
+
+    const auto sentence = explainChange(changedId);
+    rememberHistory(change, sentence);
+    showToast(change + "  " + sentence);
+}
+
+void SqueezeProcessor::notifyLockedControl(int role)
+{
+    juce::String sentence = "This part is fixed for this method.";
+
+    if (role == 5)
+        sentence = "Valve speed is automatic. The further the level crosses the line, the faster it closes.";
+    else if (role == 14)
+        sentence = "The line is fixed. Raise INPUT to push the signal into it.";
+    else if (role == 18)
+        sentence = "The ratio rises on its own as the level climbs.";
+    else if (role == 13)
+        sentence = "ALL is off until Allow ALL is enabled in the menu.";
+
+    showToast(sentence);
+}
+
+bool SqueezeProcessor::undoGesture()
+{
+    if (undoStack.empty())
+        return false;
+
+    redoStack.push_back(snapshotParameters(apvts));
+    const auto snapshot = undoStack.back();
+    undoStack.pop_back();
+    applySnapshot(snapshot);
+
+    auto state = getUiState();
+    if (! state.history.empty())
+        state.history.pop_back();
+    setUiState(std::move(state));
+    showToast("Undo");
+    return true;
+}
+
+bool SqueezeProcessor::redoGesture()
+{
+    if (redoStack.empty())
+        return false;
+
+    undoStack.push_back(snapshotParameters(apvts));
+    const auto snapshot = redoStack.back();
+    redoStack.pop_back();
+    applySnapshot(snapshot);
+    showToast("Redo");
+    return true;
+}
+
+void SqueezeProcessor::selectAbSlot(int slot)
+{
+    slot = std::clamp(slot, 0, 1);
+    auto state = getUiState();
+
+    if (state.abSlot == slot)
+        return;
+
+    state.slots[static_cast<size_t>(state.abSlot)] = snapshotParameters(apvts);
+
+    if (state.slots[static_cast<size_t>(slot)].empty())
+        state.slots[static_cast<size_t>(slot)] = state.slots[static_cast<size_t>(state.abSlot)];
+
+    const auto next = state.slots[static_cast<size_t>(slot)];
+    state.abSlot = slot;
+    setUiState(std::move(state));
+    applySnapshot(next);
+    showToast(slot == 0 ? "Listening to A" : "Listening to B");
+}
+
+void SqueezeProcessor::applyScene(int mode, int index)
+{
+    int count = 0;
+    const auto* scenes = ui::scenesForMode(mode, count);
+
+    if (scenes == nullptr || index < 0 || index >= count)
+        return;
+
+    const auto& scene = scenes[index];
+    beginGestureUndo();
+
+    if (auto* parameter = apvts.getParameter(params::mode))
+        parameter->setValueNotifyingHost(parameter->convertTo0to1(static_cast<float>(mode)));
+
+    for (int item = 0; item < scene.count; ++item)
+        if (auto* parameter = apvts.getParameter(scene.ids[item]))
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(scene.values[item]));
+
+    auto state = getUiState();
+    state.selectedScene = scene.name;
+    setUiState(std::move(state));
+    commitGesture();
+}
+
+juce::String SqueezeProcessor::toastText() const
+{
+    return toastTextValue;
 }
 
 } // namespace squeeze

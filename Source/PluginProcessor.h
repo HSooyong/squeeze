@@ -65,9 +65,23 @@ public:
     bool hasBadAudioState() const noexcept;
     int oversamplingLatencySamples() const noexcept;
 
+    // Message thread only. The audio thread never touches gesture or slot state.
+    void beginGestureUndo();
+    void commitGesture();
+    void notifyLockedControl(int role);
+    bool undoGesture();
+    bool redoGesture();
+    void selectAbSlot(int slot);
+    void applyScene(int mode, int index);
+    juce::String toastText() const;
+    juce::int64 toastShownAtMs() const noexcept { return toastAtMs; }
+
 private:
     void sanitise(UiState& state) const;
     EngineTargets readTargets() const noexcept;
+    void applySnapshot(const std::vector<ParameterSnapshot>& snapshot);
+    void showToast(juce::String text);
+    void rememberHistory(juce::String change, juce::String sentence);
     void publishFrame(const VisualFrame& frame) noexcept;
     void processChunk(float* const* channels, int numChannels, int numSamples, const EngineTargets& targets, int oversamplingIndex);
 
@@ -111,6 +125,12 @@ private:
     // Touched from the message thread and from state save/restore. Never from the audio thread.
     mutable std::mutex uiStateMutex;
     UiState uiState;
+    bool gestureOpen = false;
+    std::vector<ParameterSnapshot> gestureStart;
+    std::vector<std::vector<ParameterSnapshot>> undoStack;
+    std::vector<std::vector<ParameterSnapshot>> redoStack;
+    juce::String toastTextValue;
+    juce::int64 toastAtMs = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SqueezeProcessor)
 };

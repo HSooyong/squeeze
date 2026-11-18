@@ -141,13 +141,18 @@ void runSnapshot(const std::string& directory)
         const char* name;
         int mode;
         float amplitude;
+        bool learn;
     };
 
     const Shot shots[] = {
-        { "squeeze-m3-lamp.png", 0, 0.45f },
-        { "squeeze-m3-needle.png", 1, 0.50f },
-        { "squeeze-m3-spark.png", 2, 0.55f },
-        { "squeeze-m3-tube.png", 3, 0.60f },
+        { "lamp-default.png", 0, 0.45f, false },
+        { "needle-default.png", 1, 0.50f, false },
+        { "spark-default.png", 2, 0.55f, false },
+        { "tube-default.png", 3, 0.60f, false },
+        { "lamp-learn.png", 0, 0.45f, true },
+        { "needle-learn.png", 1, 0.50f, true },
+        { "spark-learn.png", 2, 0.55f, true },
+        { "tube-learn.png", 3, 0.60f, true },
     };
 
     for (const auto& shot : shots)
@@ -163,7 +168,7 @@ void runSnapshot(const std::string& directory)
         setRaw(processor, params::fetOutput, 3.0f);
         setRaw(processor, params::fetAttack, 300.0f);
         setRaw(processor, params::fetRelease, 250.0f);
-        setRaw(processor, params::fetRatio, shot.mode == 2 ? 2.0f : 0.0f);
+        setRaw(processor, params::fetRatio, 0.0f);
         setRaw(processor, params::vmuThreshold, -22.0f);
         setRaw(processor, params::vmuTime, 2.0f);
         setRaw(processor, params::vmuOutput, 3.5f);
@@ -178,8 +183,14 @@ void runSnapshot(const std::string& directory)
             processor.processBlock(buffer, midi);
         }
 
-        std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+        std::unique_ptr<SqueezeEditor> editor(dynamic_cast<SqueezeEditor*>(processor.createEditor()));
+        EXPECT(editor != nullptr);
         editor->setSize(ui::kDefaultWidth, ui::kDesignHeight);
+        editor->setDisclosure(shot.learn, false);
+
+        for (int tick = 0; tick < 40; ++tick)
+            editor->serviceTimerForTest();
+
         juce::Image image(juce::Image::ARGB, ui::kDefaultWidth, ui::kDesignHeight, true);
         juce::Graphics graphics(image);
         editor->paintEntireComponent(graphics, true);

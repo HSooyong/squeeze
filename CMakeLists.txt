@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
 
-# macOS builds target Apple silicon and macOS 14.7 unless the cache already says otherwise.
+# macOS builds a universal binary for Apple silicon and Intel, deployment 14.7.
 if(APPLE)
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
         set(CMAKE_OSX_DEPLOYMENT_TARGET "14.7" CACHE STRING "Minimum macOS version" FORCE)
     endif()
     if(NOT CMAKE_OSX_ARCHITECTURES)
-        set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "macOS architectures" FORCE)
+        set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" FORCE)
     endif()
 endif()
 
@@ -46,7 +46,7 @@ juce_add_plugin(SQUEEZE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
     NEEDS_CURL FALSE
     NEEDS_WEB_BROWSER FALSE
@@ -64,7 +64,16 @@ set(SQUEEZE_PLUGIN_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/Ui/Widgets.cpp
+    Source/Ui/Panels.cpp
     Source/Ui/SceneView.cpp)
+
+juce_add_binary_data(SqueezeArt
+    NAMESPACE SqueezeArt
+    SOURCES
+        Resources/scene_lamp.jpg
+        Resources/scene_needle.jpg
+        Resources/scene_spark.jpg
+        Resources/scene_tube.jpg)
 
 target_sources(SQUEEZE PRIVATE ${SQUEEZE_PLUGIN_SOURCES})
 
@@ -100,6 +109,7 @@ target_compile_definitions(SQUEEZE
 target_link_libraries(SQUEEZE
     PRIVATE
         SqueezeCore
+        SqueezeArt
         juce::juce_audio_utils
         juce::juce_dsp
         juce::juce_recommended_config_flags
@@ -118,6 +128,7 @@ target_sources(squeeze_tests
         tests/ProcessTest.cpp
         tests/DspTests.cpp
         tests/LayoutTest.cpp
+        tests/UiContractTest.cpp
         tests/TestRunner.cpp)
 
 target_include_directories(squeeze_tests
@@ -136,6 +147,7 @@ target_compile_definitions(squeeze_tests
 target_link_libraries(squeeze_tests
     PRIVATE
         SqueezeCore
+        SqueezeArt
         juce::juce_audio_utils
         juce::juce_dsp
         juce::juce_recommended_config_flags
@@ -157,7 +169,8 @@ add_test(NAME mode_switch COMMAND squeeze_tests mode_switch)
 add_test(NAME visual_contract COMMAND squeeze_tests visual_contract)
 add_test(NAME perf COMMAND squeeze_tests perf)
 add_test(NAME layout COMMAND squeeze_tests layout)
-set_tests_properties(params state process static_curve timing_vca timing_fet null_bypass mode_switch visual_contract layout PROPERTIES TIMEOUT 180)
+add_test(NAME ui_contract COMMAND squeeze_tests ui_contract)
+set_tests_properties(params state process static_curve timing_vca timing_fet null_bypass mode_switch visual_contract layout ui_contract PROPERTIES TIMEOUT 180)
 set_tests_properties(timing_opto timing_varimu level_match PROPERTIES TIMEOUT 300)
 set_tests_properties(stability PROPERTIES TIMEOUT 900)
 set_tests_properties(perf PROPERTIES LABELS perf TIMEOUT 180)

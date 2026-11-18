@@ -41,31 +41,43 @@ void Pill::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat().reduced(0.5f);
     const float radius = bounds.getHeight() * 0.5f;
-    g.setColour(selected ? accent.withAlpha(0.18f) : juce::Colours::transparentBlack);
+    g.setColour(selected ? accent : juce::Colours::transparentBlack);
     g.fillRoundedRectangle(bounds, radius);
     g.setColour(selected ? accent : kLine);
-    g.drawRoundedRectangle(bounds, radius, 1.2f);
+    g.drawRoundedRectangle(bounds, radius, selected ? 0.0f : 1.2f);
 
     const auto first = fitLine(primary, 13.0f, 11.0f, getWidth(), 12);
     const auto second = fitLine(secondary, 9.0f, 8.0f, getWidth(), 12);
 
+    auto area = getLocalBounds().reduced(8, 0);
+
+    if (selected)
+    {
+        g.setColour(juce::Colour(0xff1a140c));
+        g.setFont(interfaceFont(first.size));
+    }
+    else
+    {
+        g.setColour(kText);
+        g.setFont(interfaceFont(first.size));
+    }
+
     if (secondary.isEmpty())
     {
-        g.setColour(selected ? kText : kMuted);
-        g.setFont(interfaceFont(first.size));
-        g.drawText(primary, getLocalBounds(), juce::Justification::centred, false);
+        g.drawText(primary, area, juce::Justification::centred, false);
         return;
     }
 
-    auto area = getLocalBounds();
-    const int primaryHeight = juce::roundToInt(first.size + 1.0f);
-    auto top = area.removeFromTop(primaryHeight + 2);
-    g.setColour(kText);
-    g.setFont(interfaceFont(first.size));
-    g.drawText(primary, top, juce::Justification::centred, false);
-    g.setColour(selected ? accent : kMuted);
+    const int primaryWidth = juce::GlyphArrangement::getStringWidthInt(interfaceFont(first.size), primary);
+    const int secondaryWidth = juce::GlyphArrangement::getStringWidthInt(interfaceFont(second.size), secondary);
+    const int gap = 6;
+    const int total = primaryWidth + gap + secondaryWidth;
+    auto row = area.withSizeKeepingCentre(juce::jmin(area.getWidth(), total), area.getHeight());
+    g.drawText(primary, row.removeFromLeft(primaryWidth), juce::Justification::centred, false);
+    row.removeFromLeft(gap);
+    g.setColour(selected ? juce::Colour(0xff1a140c).withAlpha(0.75f) : kMuted);
     g.setFont(interfaceFont(second.size));
-    g.drawText(secondary, area, juce::Justification::centred, false);
+    g.drawText(secondary, row, juce::Justification::centredLeft, false);
 }
 
 void Pill::mouseUp(const juce::MouseEvent& event)
@@ -83,15 +95,34 @@ bool Logo::contentFits() const
 
 void Logo::paint(juce::Graphics& g)
 {
-    const auto first = fitLine(strings::wordmark(), 16.0f, 13.0f, getWidth(), 4);
-    const auto second = fitLine(strings::brand(), 9.0f, 8.0f, getWidth(), 4);
+    const auto word = strings::wordmark();
+    const auto brand = strings::brand();
+    const float wordSize = 15.0f;
+    const float brandSize = 9.0f;
+    const int wordWidth = juce::GlyphArrangement::getStringWidthInt(interfaceFont(wordSize), word);
+    const int brandWidth = juce::GlyphArrangement::getStringWidthInt(interfaceFont(brandSize), brand);
+
+    if (wordWidth + brandWidth + 10 < getWidth())
+    {
+        auto area = getLocalBounds();
+        g.setColour(kText);
+        g.setFont(interfaceFont(wordSize));
+        g.drawText(word, area.removeFromLeft(wordWidth + 8), juce::Justification::centredLeft, false);
+        g.setColour(kMuted);
+        g.setFont(interfaceFont(brandSize));
+        g.drawText(brand, area, juce::Justification::centredLeft, false);
+        return;
+    }
+
+    const auto first = fitLine(word, 16.0f, 13.0f, getWidth(), 4);
+    const auto second = fitLine(brand, 9.0f, 8.0f, getWidth(), 4);
     auto area = getLocalBounds();
     g.setColour(kText);
     g.setFont(interfaceFont(first.size));
-    g.drawText(strings::wordmark(), area.removeFromTop(juce::roundToInt(first.size + 2.0f)), juce::Justification::centredLeft, false);
+    g.drawText(word, area.removeFromTop(juce::roundToInt(first.size + 2.0f)), juce::Justification::centredLeft, false);
     g.setColour(kMuted);
     g.setFont(interfaceFont(second.size));
-    g.drawText(strings::brand(), area, juce::Justification::centredLeft, false);
+    g.drawText(brand, area, juce::Justification::centredLeft, false);
 }
 
 void MenuButton::paint(juce::Graphics& g)
@@ -124,7 +155,7 @@ juce::String reductionText(float grDb)
     return "-" + juce::String(grDb, 1) + " dB";
 }
 
-juce::String valueText(SqueezeProcessor& processor, const char* id)
+juce::String valueText(const SqueezeProcessor& processor, const char* id)
 {
     if (auto* parameter = dynamic_cast<juce::RangedAudioParameter*>(processor.getApvts().getParameter(id)))
         return parameter->getText(parameter->getValue(), 16);
@@ -132,7 +163,7 @@ juce::String valueText(SqueezeProcessor& processor, const char* id)
     return {};
 }
 
-float rawValue(SqueezeProcessor& processor, const char* id)
+float rawValue(const SqueezeProcessor& processor, const char* id)
 {
     if (auto* raw = processor.getApvts().getRawParameterValue(id))
         return raw->load();
@@ -147,81 +178,52 @@ GainReadout::GainReadout(SqueezeProcessor& processorIn)
 {
 }
 
-bool GainReadout::contentFits() const
+juce::String detailLine(const SqueezeProcessor& processor)
 {
-    const auto title = fitLine(strings::gainTitle(), 13.0f, 11.0f, getWidth(), 4);
-    const auto titleEn = fitLine(strings::gainTitleEn(), 9.0f, 8.0f, getWidth(), 4);
-    const auto number = fitLine(reductionText(std::abs(processor.lastVisualFrame().grDb)), 40.0f, 22.0f, getWidth(), 4);
     const int mode = juce::jlimit(0, 3, juce::roundToInt(rawValue(processor, params::mode)));
-    juce::String detail;
-
-    juce::String detailEn;
 
     if (mode == 0)
-    {
-        detail = strings::peakWord() + " " + juce::String(juce::roundToInt(rawValue(processor, params::optoPeakRed)));
-        detailEn = "PEAK";
-    }
-    else if (mode == 1)
-        detail = valueText(processor, params::vcaRatio) + " · " + valueText(processor, params::vcaThreshold);
-    else if (mode == 2)
-        detail = valueText(processor, params::fetInput) + " · " + valueText(processor, params::fetRatio);
-    else
-        detail = valueText(processor, params::vmuTime) + " · " + valueText(processor, params::vmuThreshold);
+        return "Peak Red. " + juce::String(juce::roundToInt(rawValue(processor, params::optoPeakRed)))
+               + " · " + valueText(processor, params::optoLimit);
 
-    const auto detailFit = fitLine(detail, 12.0f, 10.0f, getWidth(), 4);
-    const auto detailEnFit = fitLine(detailEn, 9.0f, 8.0f, getWidth(), 4);
-    const float used = title.size + titleEn.size + number.size + detailFit.size + (detailEn.isEmpty() ? 0.0f : detailEnFit.size) + 16.0f;
-    return title.ok && titleEn.ok && number.ok && detailFit.ok && detailEnFit.ok && used <= static_cast<float>(getHeight());
+    if (mode == 1)
+        return valueText(processor, params::vcaRatio) + " · " + valueText(processor, params::vcaThreshold);
+
+    if (mode == 2)
+        return "Input " + valueText(processor, params::fetInput) + " · Ratio " + valueText(processor, params::fetRatio);
+
+    return "Threshold " + valueText(processor, params::vmuThreshold) + " · " + valueText(processor, params::vmuTime);
+}
+
+bool GainReadout::contentFits() const
+{
+    const auto title = fitLine(strings::gainTitle(), 12.0f, 10.0f, getWidth(), 4);
+    const auto number = fitLine(reductionText(std::abs(processor.lastVisualFrame().grDb)), 42.0f, 22.0f, getWidth(), 4);
+    const auto detail = fitLine(detailLine(processor), 13.0f, 10.0f, getWidth(), 4);
+    const float used = title.size + number.size + detail.size + 18.0f;
+    return title.ok && number.ok && detail.ok && used <= static_cast<float>(getHeight());
 }
 
 void GainReadout::paint(juce::Graphics& g)
 {
-    const int mode = juce::jlimit(0, 3, juce::roundToInt(rawValue(processor, params::mode)));
-    const auto title = fitLine(strings::gainTitle(), 13.0f, 11.0f, getWidth(), 4);
-    const auto titleEn = fitLine(strings::gainTitleEn(), 9.0f, 8.0f, getWidth(), 4);
+    const auto title = fitLine(strings::gainTitle(), 12.0f, 10.0f, getWidth(), 4);
     const auto numberText = reductionText(std::abs(processor.lastVisualFrame().grDb));
-    const auto number = fitLine(numberText, 40.0f, 22.0f, getWidth(), 4);
-    juce::String detail;
-
-    juce::String detailEn;
-
-    if (mode == 0)
-    {
-        detail = strings::peakWord() + " " + juce::String(juce::roundToInt(rawValue(processor, params::optoPeakRed)));
-        detailEn = "PEAK";
-    }
-    else if (mode == 1)
-        detail = valueText(processor, params::vcaRatio) + " · " + valueText(processor, params::vcaThreshold);
-    else if (mode == 2)
-        detail = valueText(processor, params::fetInput) + " · " + valueText(processor, params::fetRatio);
-    else
-        detail = valueText(processor, params::vmuTime) + " · " + valueText(processor, params::vmuThreshold);
-
-    const auto detailFit = fitLine(detail, 12.0f, 10.0f, getWidth(), 4);
-    const auto detailEnFit = fitLine(detailEn, 9.0f, 8.0f, getWidth(), 4);
+    const auto number = fitLine(numberText, 42.0f, 22.0f, getWidth(), 4);
+    const auto detail = detailLine(processor);
+    const auto detailFit = fitLine(detail, 13.0f, 10.0f, getWidth(), 4);
     auto area = getLocalBounds();
 
     g.setColour(kMuted);
     g.setFont(interfaceFont(title.size));
-    g.drawText(strings::gainTitle(), area.removeFromTop(juce::roundToInt(title.size + 2.0f)), juce::Justification::centredLeft, false);
-    g.setFont(interfaceFont(titleEn.size));
-    g.drawText(strings::gainTitleEn(), area.removeFromTop(juce::roundToInt(titleEn.size + 4.0f)), juce::Justification::centredLeft, false);
-
-    g.setColour(kModeColour[mode]);
-    g.setFont(interfaceFont(number.size));
-    g.drawText(numberText, area.removeFromTop(juce::roundToInt(number.size + 4.0f)), juce::Justification::centredLeft, false);
+    g.drawText(strings::gainTitle(), area.removeFromTop(juce::roundToInt(title.size + 4.0f)), juce::Justification::centredLeft, false);
 
     g.setColour(kText);
+    g.setFont(interfaceFont(number.size));
+    g.drawText(numberText, area.removeFromTop(juce::roundToInt(number.size + 2.0f)), juce::Justification::centredLeft, false);
+
+    g.setColour(kMuted);
     g.setFont(interfaceFont(detailFit.size));
     g.drawText(detail, area.removeFromTop(juce::roundToInt(detailFit.size + 2.0f)), juce::Justification::centredLeft, false);
-
-    if (detailEn.isNotEmpty())
-    {
-        g.setColour(kMuted);
-        g.setFont(interfaceFont(detailEnFit.size));
-        g.drawText(detailEn, area.removeFromTop(juce::roundToInt(detailEnFit.size + 2.0f)), juce::Justification::centredLeft, false);
-    }
 }
 
 OutputSlider::OutputSlider(SqueezeProcessor& processorIn)
@@ -239,7 +241,7 @@ OutputSlider::Spec OutputSlider::spec() const
     const int mode = juce::jlimit(0, 3, juce::roundToInt(rawValue(processor, params::mode)));
 
     if (mode == 0)
-        return { params::optoGain, strings::gainSlider(), strings::gainSliderEn() };
+        return { params::optoGain, strings::gainSlider(), {} };
 
     const char* id = params::vcaOutput;
 
@@ -248,7 +250,7 @@ OutputSlider::Spec OutputSlider::spec() const
     else if (mode == 3)
         id = params::vmuOutput;
 
-    return { id, strings::outputSlider(), strings::outputSliderEn() };
+    return { id, strings::outputSlider(), {} };
 }
 
 juce::RangedAudioParameter* OutputSlider::parameter() const
@@ -265,7 +267,10 @@ void OutputSlider::begin(juce::RangedAudioParameter* next)
     gesture = next;
 
     if (gesture != nullptr)
+    {
+        processor.beginGestureUndo();
         gesture->beginChangeGesture();
+    }
 }
 
 void OutputSlider::writeNorm(float norm)
@@ -277,7 +282,10 @@ void OutputSlider::writeNorm(float norm)
 void OutputSlider::end()
 {
     if (gesture != nullptr)
+    {
         gesture->endChangeGesture();
+        processor.commitGesture();
+    }
 
     gesture = nullptr;
 }
@@ -305,9 +313,10 @@ bool OutputSlider::contentFits() const
     const auto current = spec();
     const auto title = fitLine(current.primary, 12.0f, 10.0f, getWidth(), 2);
     const auto titleEn = fitLine(current.secondary, 8.0f, 8.0f, getWidth(), 2);
-    const auto value = fitLine(valueText(processor, current.id), 11.0f, 9.0f, getWidth(), 2);
-    return title.ok && titleEn.ok && value.ok
-           && title.size + titleEn.size + 4.0f <= static_cast<float>(titleArea().getHeight())
+    const auto value = fitLine(valueText(processor, current.id), 12.0f, 9.0f, getWidth(), 2);
+    const float titleUsed = title.size + (current.secondary.isEmpty() ? 0.0f : titleEn.size + 1.0f);
+    return title.ok && (current.secondary.isEmpty() || titleEn.ok) && value.ok
+           && titleUsed + 4.0f <= static_cast<float>(titleArea().getHeight())
            && value.size + 4.0f <= static_cast<float>(valueArea().getHeight());
 }
 
@@ -329,17 +338,13 @@ void OutputSlider::paint(juce::Graphics& g)
     const int mode = juce::jlimit(0, 3, juce::roundToInt(rawValue(processor, params::mode)));
     const auto current = spec();
     const auto title = fitLine(current.primary, 12.0f, 10.0f, getWidth(), 2);
-    const auto titleEn = fitLine(current.secondary, 8.0f, 8.0f, getWidth(), 2);
     const auto valueString = valueText(processor, current.id);
-    const auto value = fitLine(valueString, 11.0f, 9.0f, getWidth(), 2);
+    const auto value = fitLine(valueString, 12.0f, 9.0f, getWidth(), 2);
     auto heading = titleArea();
 
-    g.setColour(kText);
-    g.setFont(interfaceFont(title.size));
-    g.drawText(current.primary, heading.removeFromTop(juce::roundToInt(title.size + 1.0f)), juce::Justification::centred, false);
     g.setColour(kMuted);
-    g.setFont(interfaceFont(titleEn.size));
-    g.drawText(current.secondary, heading, juce::Justification::centred, false);
+    g.setFont(interfaceFont(title.size));
+    g.drawText(current.primary, heading, juce::Justification::centred, false);
 
     auto track = trackArea().toFloat();
     g.setColour(kTrack);

@@ -23,6 +23,7 @@ void runModeSwitch();
 void runVisualContract();
 void runPerf();
 void runLayout();
+void runUiContract();
 void runSnapshot(const std::string& directory);
 }
 
@@ -65,6 +66,8 @@ int runNamed(const std::string& name, const std::string& extra)
             squeeze::test::runPerf();
         else if (name == "layout")
             squeeze::test::runLayout();
+        else if (name == "ui_contract")
+            squeeze::test::runUiContract();
         else if (name == "snapshot")
             squeeze::test::runSnapshot(extra);
         else

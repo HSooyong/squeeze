@@ -23,9 +23,12 @@ struct SqueezeBoxes
     juce::Rectangle<int> scene;
     juce::Rectangle<int> output;
     juce::Rectangle<int> meterHandle;
+    juce::Rectangle<int> learnBody;
+    juce::Rectangle<int> dock;
+    juce::Rectangle<int> meterDrawer;
 };
 
-inline SqueezeBoxes squeezeBoxes(int width, int height)
+inline SqueezeBoxes squeezeBoxes(int width, int height, bool learnOpen = false, bool meterOpen = false)
 {
     SqueezeBoxes boxes;
     const float scale = static_cast<float>(width) / static_cast<float>(kDefaultWidth);
@@ -81,7 +84,7 @@ inline SqueezeBoxes squeezeBoxes(int width, int height)
     const int gainH = juce::jmax(108, px(132.0f));
     boxes.gain = { margin, bodyTop, gainW, gainH };
 
-    const int outW = juce::jmax(46, px(58.0f));
+    const int outW = juce::jmax(68, px(72.0f));
     const int outTop = bodyTop + px(4.0f);
     const int outBottom = boxes.meterHandle.getY() - juce::jmax(8, px(10.0f));
     boxes.output = { width - margin - outW, outTop, outW, juce::jmax(100, outBottom - outTop) };
@@ -93,6 +96,33 @@ inline SqueezeBoxes squeezeBoxes(int width, int height)
                     bodyTop,
                     juce::jmax(0, sceneRight - sceneLeft),
                     juce::jmax(0, sceneBottom - bodyTop) };
+
+    if (meterOpen)
+    {
+        const int drawerH = juce::jlimit(120, 180, px(148.0f));
+        boxes.meterDrawer = { 0, height - drawerH, width, drawerH };
+        boxes.meterHandle = { (width - handleW) / 2, boxes.meterDrawer.getY() - handleH, handleW, handleH };
+        const int sceneBottomOpen = boxes.meterHandle.getY() - gap;
+        boxes.scene.setHeight(juce::jmax(80, sceneBottomOpen - boxes.scene.getY()));
+        boxes.output.setHeight(juce::jmax(80, sceneBottomOpen - boxes.output.getY()));
+        boxes.gain.setHeight(juce::jmin(boxes.gain.getHeight(), boxes.scene.getHeight()));
+    }
+
+    if (learnOpen)
+    {
+        const int sideW = juce::jlimit(210, 280, px(250.0f));
+        const int dockW = juce::jlimit(220, 300, px(270.0f));
+        const int bodyBottom = boxes.scene.getBottom();
+        boxes.learnBody = { margin,
+                            boxes.gain.getBottom() + gap,
+                            sideW,
+                            juce::jmax(80, bodyBottom - boxes.gain.getBottom() - gap) };
+        boxes.dock = { boxes.output.getX() - gap - dockW, boxes.scene.getY(), dockW, boxes.scene.getHeight() };
+        const int left = boxes.learnBody.getRight() + gap;
+        const int rightEdge = boxes.dock.getX() - gap;
+        boxes.scene = { left, boxes.scene.getY(), juce::jmax(80, rightEdge - left), boxes.scene.getHeight() };
+    }
+
     return boxes;
 }
 
