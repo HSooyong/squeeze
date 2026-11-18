@@ -156,7 +156,8 @@ void runUiContract()
 
         std::unique_ptr<juce::AudioProcessorEditor> view(shot.createEditor());
         view->setSize(ui::kDefaultWidth, ui::kDesignHeight);
-        juce::Image image(juce::Image::ARGB, ui::kDefaultWidth, ui::kDesignHeight, true);
+        // Windows defaults to a Direct2D image, which does not read back in headless CI.
+        juce::Image image(juce::Image::ARGB, ui::kDefaultWidth, ui::kDesignHeight, true, juce::SoftwareImageType{});
         juce::Graphics graphics(image);
         view->paintEntireComponent(graphics, true);
         EXPECT(countPixels(image, true) < 30);

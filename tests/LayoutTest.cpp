@@ -191,7 +191,7 @@ void runSnapshot(const std::string& directory)
         for (int tick = 0; tick < 40; ++tick)
             editor->serviceTimerForTest();
 
-        juce::Image image(juce::Image::ARGB, ui::kDefaultWidth, ui::kDesignHeight, true);
+        juce::Image image(juce::Image::ARGB, ui::kDefaultWidth, ui::kDesignHeight, true, juce::SoftwareImageType{});
         juce::Graphics graphics(image);
         editor->paintEntireComponent(graphics, true);
 
